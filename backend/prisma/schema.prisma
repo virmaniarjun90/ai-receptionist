@@ -1,0 +1,92 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MessageRole {
+  user
+  assistant
+}
+
+enum Channel {
+  whatsapp
+  sms
+  voice
+}
+
+model Tenant {
+  id        String     @id @default(uuid()) @db.Uuid
+  name      String
+  type      String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  properties Property[]
+}
+
+model Property {
+  id            String         @id @default(uuid()) @db.Uuid
+  tenantId      String?        @db.Uuid
+  tenant        Tenant?        @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  name          String
+  type          String?
+  description   String?
+  address       String?
+  phone         String?
+  checkInTime   String?
+  checkOutTime  String?
+  amenities     String[]       @default([])
+  policies      String[]       @default([])
+  config        Json?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  conversations Conversation[]
+  knowledge     Knowledge[]
+
+  @@index([tenantId])
+}
+
+model Conversation {
+  id         String    @id @default(uuid()) @db.Uuid
+  propertyId String?   @db.Uuid
+  property   Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  userPhone  String
+  channel    Channel   @default(whatsapp)
+  createdAt  DateTime  @default(now())
+  messages   Message[]
+
+  @@index([propertyId, userPhone, channel])
+  @@index([propertyId, createdAt])
+  @@index([userPhone])
+}
+
+model Message {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId String       @db.Uuid
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  from           String
+  to             String
+  content        String
+  role           MessageRole
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([from, createdAt])
+  @@index([to, createdAt])
+}
+
+model Knowledge {
+  id         String   @id @default(uuid()) @db.Uuid
+  propertyId String   @db.Uuid
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  key        String
+  value      String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([propertyId, key])
+  @@index([propertyId])
+}

@@ -1,0 +1,17 @@
+{
+  "name": "ai-receptionist",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workspace wrapper for the AI receptionist backend.",
+  "scripts": {
+    "build": "npm --prefix backend run build",
+    "dev:all": "npm --prefix backend run dev:all",
+    "start": "npm --prefix backend run start",
+    "start:dev": "npm --prefix backend run start:dev",
+    "prisma:generate": "npm --prefix backend run prisma:generate",
+    "prisma:migrate": "npm --prefix backend run prisma:migrate",
+    "prisma:studio": "npm --prefix backend run prisma:studio",
+    "lint": "npm --prefix backend run lint",
+    "format": "npm --prefix backend run format"
+  }
+}
