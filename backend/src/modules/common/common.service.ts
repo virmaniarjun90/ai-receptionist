@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import Redis from 'ioredis';
+import { Inject, Injectable } from '@nestjs/common';
+import { APP_CONFIG, AppConfig } from '../../config/app.config';
 import { PrismaService } from './prisma.service';
 
 export type DependencyHealth = {
@@ -12,29 +12,29 @@ export type HealthStatus = {
   dependencies: {
     db: DependencyHealth;
     redis: DependencyHealth;
-    openai: DependencyHealth;
+    llm: DependencyHealth;
     twilio: DependencyHealth;
   };
 };
 
 @Injectable()
 export class CommonService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+  ) {}
 
   async getHealthStatus(): Promise<HealthStatus> {
+    const [db, redis] = await Promise.all([this.checkDb(), this.checkRedis()]);
+
     const dependencies = {
-      db: await this.checkDb(),
-      redis: await this.checkRedis(),
-      openai: this.checkRequiredEnv('OPENAI_API_KEY', 'OpenAI API key configured'),
+      db,
+      redis,
+      llm: this.checkLlmConfig(),
       twilio: this.checkTwilioConfig(),
     };
 
-    const status = Object.values(dependencies).every(
-      (dependency) => dependency.status === 'ok',
-    )
-      ? 'ok'
-      : 'degraded';
-
+    const status = Object.values(dependencies).every((d) => d.status === 'ok') ? 'ok' : 'degraded';
     return { status, dependencies };
   }
 
@@ -42,71 +42,68 @@ export class CommonService {
     try {
       await this.prisma.$queryRaw`SELECT 1`;
       return { status: 'ok' };
-    } catch (error) {
-      return {
-        status: 'error',
-        detail: 'DB_ERROR: PostgreSQL connection failed',
-      };
+    } catch {
+      return { status: 'error', detail: 'DB_ERROR: PostgreSQL connection failed' };
     }
   }
 
   private async checkRedis(): Promise<DependencyHealth> {
+    // Re-use the BullMQ connection by pinging through Prisma's redis client is not
+    // available here; we do a lightweight check via ioredis but share config values
+    // from AppConfig so there is a single source of truth.
+    const { default: Redis } = await import('ioredis');
     const redis = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: Number(process.env.REDIS_PORT || 6379),
+      host: this.config.redis.host,
+      port: this.config.redis.port,
       connectTimeout: 1000,
       maxRetriesPerRequest: 1,
       lazyConnect: true,
     });
-
     try {
       await redis.connect();
       await redis.ping();
       return { status: 'ok' };
-    } catch (error) {
-      return {
-        status: 'error',
-        detail: 'QUEUE_ERROR: Redis connection failed',
-      };
+    } catch {
+      return { status: 'error', detail: 'QUEUE_ERROR: Redis connection failed' };
     } finally {
       redis.disconnect();
     }
   }
 
-  private checkTwilioConfig(): DependencyHealth {
-    const required = [
-      'TWILIO_ACCOUNT_SID',
-      'TWILIO_AUTH_TOKEN',
-      'TWILIO_WHATSAPP_NUMBER',
-    ];
-    const missing = required.filter((name) => !process.env[name]);
+  /** Reports LLM health for whichever provider is actually configured. */
+  private checkLlmConfig(): DependencyHealth {
+    const { provider, openaiApiKey, anthropicApiKey, kimiApiKey } = this.config.llm;
 
-    if (missing.length > 0) {
-      return {
-        status: 'error',
-        detail: `MESSAGING_SERVICE_ERROR: Missing ${missing.join(', ')}`,
-      };
+    if (provider === 'mock') {
+      return { status: 'ok', detail: 'LLM provider: mock (no credentials required)' };
+    }
+    if (provider === 'openai' && !openaiApiKey) {
+      return { status: 'error', detail: 'AI_SERVICE_ERROR: OPENAI_API_KEY is not set' };
+    }
+    if (provider === 'claude' && !anthropicApiKey) {
+      return { status: 'error', detail: 'AI_SERVICE_ERROR: ANTHROPIC_API_KEY is not set' };
+    }
+    if (provider === 'kimi' && !kimiApiKey) {
+      return { status: 'error', detail: 'AI_SERVICE_ERROR: KIMI_API_KEY is not set' };
     }
 
-    if (!process.env.TWILIO_WHATSAPP_NUMBER?.startsWith('whatsapp:')) {
-      return {
-        status: 'warning',
-        detail:
-          'MESSAGING_SERVICE_WARNING: TWILIO_WHATSAPP_NUMBER should include whatsapp:',
-      };
-    }
-
-    return { status: 'ok', detail: 'Twilio configuration present' };
+    return { status: 'ok', detail: `LLM provider: ${provider}` };
   }
 
-  private checkRequiredEnv(name: string, okDetail: string): DependencyHealth {
-    if (!process.env[name]) {
-      return {
-        status: 'error',
-        detail: `AI_SERVICE_ERROR: Missing ${name}`,
-      };
-    }
+  private checkTwilioConfig(): DependencyHealth {
+    const { accountSid, authToken, whatsappNumber } = this.config.twilio;
+    const missing = [
+      !accountSid && 'TWILIO_ACCOUNT_SID',
+      !authToken && 'TWILIO_AUTH_TOKEN',
+      !whatsappNumber && 'TWILIO_WHATSAPP_NUMBER',
+    ].filter(Boolean);
 
-    return { status: 'ok', detail: okDetail };
+    if (missing.length > 0) {
+      return { status: 'error', detail: `MESSAGING_SERVICE_ERROR: Missing ${missing.join(', ')}` };
+    }
+    if (!whatsappNumber?.startsWith('whatsapp:')) {
+      return { status: 'warning', detail: 'MESSAGING_SERVICE_WARNING: TWILIO_WHATSAPP_NUMBER should start with "whatsapp:"' };
+    }
+    return { status: 'ok', detail: 'Twilio configuration present' };
   }
 }

@@ -1,14 +1,11 @@
-import { forwardRef, Module } from '@nestjs/common';
-import { QueueModule } from '../queue/queue.module';
-import { CommunicationController } from './communication.controller';
+import { Module } from '@nestjs/common';
 import { CommunicationService } from './communication.service';
 import { MESSAGING_PROVIDER } from './providers/messaging.interface';
 import { TwilioProvider } from './providers/twilio.provider';
 
-// CommunicationModule owns external channels; today that is Twilio WhatsApp.
+// Owns outbound messaging only. No dependency on QueueModule or WebhookModule.
+// The inbound webhook lives in WebhookModule; this keeps the dependency graph acyclic.
 @Module({
-  imports: [forwardRef(() => QueueModule)],
-  controllers: [CommunicationController],
   providers: [
     CommunicationService,
     TwilioProvider,

@@ -2,16 +2,21 @@
   "name": "ai-receptionist",
   "version": "0.1.0",
   "private": true,
-  "description": "Workspace wrapper for the AI receptionist backend.",
+  "description": "Workspace for the AI Receptionist backend and admin UI.",
   "scripts": {
-    "build": "npm --prefix backend run build",
-    "dev:all": "npm --prefix backend run dev:all",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:admin\" --names \"backend,admin\" --prefix-colors \"cyan,magenta\"",
+    "dev:backend": "npm --prefix backend run start:dev",
+    "dev:admin": "npm --prefix admin run dev",
+    "build": "npm --prefix backend run build && npm --prefix admin run build",
     "start": "npm --prefix backend run start",
-    "start:dev": "npm --prefix backend run start:dev",
     "prisma:generate": "npm --prefix backend run prisma:generate",
     "prisma:migrate": "npm --prefix backend run prisma:migrate",
+    "prisma:seed": "npm --prefix backend exec -- npx ts-node prisma/seed.ts",
     "prisma:studio": "npm --prefix backend run prisma:studio",
     "lint": "npm --prefix backend run lint",
     "format": "npm --prefix backend run format"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
   }
 }

@@ -1,170 +1,155 @@
-# AI Receptionist Backend Team Guide
+# AI Receptionist — Team Guide
 
-## Architecture
+Quick reference for engineers working on this backend.
 
-This backend is a modular NestJS monolith. Each module owns one clear part of the system:
+---
 
-- `communication`: Twilio WhatsApp webhook and outbound Twilio messaging.
-- `queue`: BullMQ producer and worker for async message processing.
-- `conversation`: conversation and message persistence APIs.
-- `property`: hotel/property dashboard APIs and property facts.
-- `ai`: PII masking, prompt building, and provider-agnostic LLM calls.
-- `common`: shared infrastructure such as Prisma.
+## Request flow (every WhatsApp message)
 
-Controllers stay thin. Business flow lives in services and workers.
+```
+POST /webhook/whatsapp
+  WebhookController
+    validates Twilio signature (prod) → QueueService.addMessageJob()
 
-## Queue Flow
-
-```text
-Twilio WhatsApp
-  -> POST /webhook/whatsapp
-  -> QueueService adds process-message job
-  -> QueueProcessor starts job
-  -> PropertyService fetches property context
-  -> ConversationService stores user message
-  -> ConversationService fetches last 10 messages
-  -> PiiService masks sensitive values
-  -> AiService builds prompt and calls LLM wrapper
-  -> ConversationService stores assistant reply
-  -> CommunicationService sends WhatsApp reply
+BullMQ worker: QueueProcessor.process()
+  PropertyService.getPropertyByPhone(To)       → find which property
+  ConversationService.getOrCreate(from, propId) → conversation record
+  ConversationService.addMessage(…, 'user')     → persist inbound
+  ReservationService.getActiveByPhone(from)     → guest lookup
+  KnowledgeService.getKnowledgeByProperty()     → FAQs
+  ConversationService.getRecentMessages(10)     → history window
+  AiService.generateReply(msgs, prop, know, res) → LLM call
+  ConversationService.addMessage(…, 'assistant') → persist reply
+  CommunicationService.sendWhatsAppMessage()    → Twilio send
 ```
 
-Queue name: `message-processing`
+Jobs retry 3× with exponential backoff. Failures land in BullMQ's failed set (Redis).
 
-Job name: `process-message`
+---
 
-Jobs retry 3 times with exponential backoff. The producer and processor log enqueue, start, completion, and failures with attempt counts.
+## Adding a new LLM provider
 
-## AI Wrapper
+1. Create `src/modules/ai/llm/myprovider.provider.ts` implementing `LlmProvider`.
+2. Add it to the providers array in `AiModule`.
+3. Inject it into `LlmFactory` and add a `case` in `resolveProvider()`.
+4. Add a new value to `LlmProviderName` in `app.config.ts`.
+5. Add the API key env var to `.env.example` and `validateConfig()`.
 
-All LLM calls must go through `AiService`.
+---
 
-`AiService` flow:
+## Adding a new messaging channel (e.g. SMS, email)
 
-```text
-messages
-  -> PiiService.sanitizeMessages
-  -> PromptService.buildSystemPrompt(property)
-  -> LlmFactory.getProvider()
-  -> provider.generateReply(messages, systemPrompt)
+1. Create a provider implementing `MessagingProvider`.
+2. Wire it in `CommunicationModule` behind `MESSAGING_PROVIDER` (or a new token).
+3. Add a new `Channel` value to the Prisma schema.
+4. Add an inbound webhook controller in `WebhookModule`.
+
+---
+
+## Adding a new channel manager
+
+1. Create `src/modules/channel-manager/providers/myprovider.provider.ts` implementing `ChannelManagerProvider`.
+2. Add it to `ChannelManagerModule` providers and the factory `useFactory`.
+3. Add a new value to `ChannelManagerProviderName` in `app.config.ts`.
+
+---
+
+## Config
+
+`src/config/app.config.ts` is the single source of truth. `buildAppConfig()` reads env vars once at startup. `validateConfig()` throws immediately if required keys are missing. The `APP_CONFIG` token is provided globally by `CommonModule`.
+
+To add a new config value: add the field to `AppConfig`, read it in `buildAppConfig()`, add validation in `validateConfig()` if required.
+
+---
+
+## Database
+
+Prisma schema: `prisma/schema.prisma`
+
+Key models:
+- `Tenant` → `Property` (1:N) — multi-tenant foundation
+- `Property` → `Conversation` (1:N) — routed by `phoneNumber`
+- `Conversation` → `Message` (1:N) — full history
+- `Property` → `Knowledge` (1:N) — per-property FAQ facts
+- `Property` → `Reservation` (1:N) — synced from channel manager
+
+`Property.phoneNumber` is unique. It's the routing key for inbound messages.
+`Reservation.guestPhone` is matched at message-time to personalise AI replies.
+
+Migrations:
+```bash
+npx prisma migrate dev --name your_change  # dev only
+npx prisma migrate deploy                   # production
 ```
 
-The provider interface is:
+---
 
-```ts
-generateReply(messages, systemPrompt): Promise<string>
-```
+## Channel manager sync
 
-Implemented providers:
+`SyncService.syncProperty(id)` pulls from the active `ChannelManagerProvider`, updates the `Property` row, upserts `Knowledge` entries, and upserts `Reservations`.
 
-- `openai`: active implementation using the OpenAI SDK.
-- `claude`: stub, returns a service-unavailable error until implemented.
-- `kimi`: stub, returns a service-unavailable error until implemented.
+`SyncScheduler.syncAllProperties()` runs this for every property with a non-null `externalId`. It runs automatically on the `SYNC_CRON` schedule (default: hourly) and can be triggered manually via `POST /admin/sync`.
 
-## Switching LLM Providers
+---
 
-Set:
+## PII masking
 
-```env
-LLM_PROVIDER=openai
-```
+`PiiService.sanitizeMessages()` runs before every LLM call. It masks phone numbers, emails, names, and booking IDs. Controlled by `PII_MASKING_ENABLED` env var. Never bypass this for production LLM calls.
 
-Allowed values:
+---
 
-```text
-openai | claude | kimi
-```
+## Admin API security
 
-Only `openai` is production-ready today. The other providers exist so the app boundary is ready for future integrations without changing queue or controller code.
+`AdminGuard` checks the `X-Admin-Key` header. If `ADMIN_API_KEY` is empty, the guard passes (dev mode). Always set `ADMIN_API_KEY` in production.
 
-## PII Protection
+---
 
-`PiiService` masks sensitive user data before messages reach the LLM provider.
-
-Masked values include:
-
-- Phone numbers: `[PHONE]`
-- Email addresses: `[EMAIL]`
-- Names from simple self-identification patterns: `[NAME]`
-- Booking IDs and numeric identifiers: `[BOOKING_ID]`, `[IDENTIFIER]`
-
-Example:
-
-```text
-Call me at 9876543210, my name is Arjun
-```
-
-becomes:
-
-```text
-Call me at [PHONE], my name is [NAME]
-```
-
-Set masking with:
-
-```env
-PII_MASKING_ENABLED=true
-```
-
-Do not bypass this service for LLM calls.
-
-## Property Prompt System
-
-The `Property` model stores hotel facts used in the system prompt:
-
-- name
-- description
-- address
-- phone
-- check-in/check-out times
-- amenities
-- policies
-
-`PromptService` builds a receptionist prompt with property context. If no property exists, the AI falls back to a generic helpful hotel receptionist prompt.
-
-## Dashboard APIs
-
-Properties:
-
-```text
-GET /properties
-POST /properties
-```
-
-Conversations:
-
-```text
-GET /conversations
-GET /conversations/:id
-GET /conversations/:phoneNumber/messages
-```
-
-## Environment Variables
-
-```env
-DATABASE_URL="postgresql://..."
-OPENAI_API_KEY="..."
-TWILIO_ACCOUNT_SID="..."
-TWILIO_AUTH_TOKEN="..."
-TWILIO_WHATSAPP_NUMBER="whatsapp:+14155238886"
-REDIS_HOST="localhost"
-REDIS_PORT="6379"
-LLM_PROVIDER="openai"
-PII_MASKING_ENABLED="true"
-```
-
-## Local Runtime
-
-Start PostgreSQL and Redis before running the backend.
+## Local dev shortcuts
 
 ```bash
-npm install
-npx prisma migrate dev
-npm run start:dev
+# Start everything (backend + admin UI)
+npm run dev                     # from workspace root
+
+# Backend only
+cd backend && npm run start:dev
+
+# Admin UI only
+cd admin && npm run dev
+
+# Seed the database
+cd backend && npx ts-node prisma/seed.ts
 ```
 
-For WhatsApp testing, expose the backend with ngrok and configure Twilio to call:
+Once running, open:
+- Admin UI → http://localhost:5173
+- Swagger → http://localhost:3000/api
+- Health → http://localhost:3000/health
 
-```text
-POST https://your-ngrok-domain/webhook/whatsapp
+```bash
+# Test the webhook locally (no Twilio needed)
+# Requires TWILIO_VALIDATE_WEBHOOK=false in .env
+curl -X POST http://localhost:3000/webhook/whatsapp \
+  -H "Content-Type: application/json" \
+  -d '{"Body":"What is the wifi password?","From":"whatsapp:+911234567890","To":"whatsapp:+14155238886"}'
+# Then open http://localhost:5173 → Conversations to see the AI reply
+
+# Trigger a sync manually
+curl -X POST http://localhost:3000/admin/properties/<id>/sync
 ```
+
+The seeded guest (`whatsapp:+911234567890`) has an active reservation, so the AI will greet them by name.
+
+---
+
+## Environment quick reference
+
+| Variable | Default | Notes |
+|---|---|---|
+| `LLM_PROVIDER` | `mock` | `mock\|openai\|claude\|kimi` |
+| `CHANNEL_MANAGER_PROVIDER` | `mock` | `mock\|airbnb` |
+| `TWILIO_VALIDATE_WEBHOOK` | `true` | Set `false` for local dev/curl testing |
+| `ADMIN_API_KEY` | (empty) | Empty = open in dev |
+| `SYNC_CRON` | `0 * * * *` | Cron for auto-sync |
+| `CORS_ORIGIN` | `http://localhost:5173` | Admin UI origin |
+
+Full list in `backend/.env.example`.

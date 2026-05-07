@@ -1,6 +1,5 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { Knowledge, Property } from '@prisma/client';
-import { FeatureFlagsService } from '../common/feature-flags.service';
+import { Knowledge, Property, Reservation } from '@prisma/client';
 import { LlmFactory } from './llm/llm.factory';
 import { PiiService } from './pii.service';
 import { PromptService } from './prompt.service';
@@ -13,7 +12,6 @@ export type AiConversationMessage = {
 @Injectable()
 export class AiService {
   constructor(
-    private readonly featureFlags: FeatureFlagsService,
     private readonly llmFactory: LlmFactory,
     private readonly piiService: PiiService,
     private readonly promptService: PromptService,
@@ -23,35 +21,19 @@ export class AiService {
     messages: AiConversationMessage[],
     property: Property | null = null,
     knowledge: Knowledge[] = [],
+    reservation: Reservation | null = null,
   ): Promise<string> {
-    const conversationMessages = messages.filter((message) =>
-      message.content.trim(),
-    );
-
-    if (conversationMessages.length === 0) {
+    const nonEmpty = messages.filter((m) => m.content.trim());
+    if (nonEmpty.length === 0) {
       return 'How may I help you today?';
     }
 
-    if (!this.featureFlags.isAiEnabled()) {
-      return 'AI replies are temporarily disabled. A receptionist will follow up shortly.';
-    }
-
     try {
-      const sanitizedMessages =
-        this.piiService.sanitizeMessages(conversationMessages);
-      const systemPrompt = this.promptService.buildSystemPrompt(
-        property,
-        knowledge,
-      );
-
-      return await this.llmFactory
-        .getProvider()
-        .generateReply(sanitizedMessages, systemPrompt);
+      const sanitized = this.piiService.sanitizeMessages(nonEmpty);
+      const systemPrompt = this.promptService.buildSystemPrompt(property, knowledge, reservation);
+      return await this.llmFactory.getProvider().generateReply(sanitized, systemPrompt);
     } catch (error) {
-      // Keep provider details out of the HTTP response while preserving a clear failure boundary.
-      throw new InternalServerErrorException(
-        'AI_SERVICE_ERROR: LLM reply generation failed',
-      );
+      throw new InternalServerErrorException('AI_SERVICE_ERROR: LLM reply generation failed');
     }
   }
 }

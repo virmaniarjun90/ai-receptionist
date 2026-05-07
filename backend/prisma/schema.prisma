@@ -7,71 +7,69 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum MessageRole {
-  user
-  assistant
-}
-
-enum Channel {
-  whatsapp
-  sms
-  voice
-}
-
 model Tenant {
-  id        String     @id @default(uuid()) @db.Uuid
-  name      String
-  type      String
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id         String     @id @default(uuid()) @db.Uuid
+  name       String
+  type       String
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
   properties Property[]
 }
 
 model Property {
   id            String         @id @default(uuid()) @db.Uuid
-  tenantId      String?        @db.Uuid
-  tenant        Tenant?        @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   name          String
-  type          String?
   description   String?
   address       String?
   phone         String?
+  hostPhone     String?
   checkInTime   String?
   checkOutTime  String?
   amenities     String[]       @default([])
   policies      String[]       @default([])
-  config        Json?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+  config        Json?
+  tenantId      String?        @db.Uuid
+  type          String?
+  externalId    String?
+  phoneNumber   String?        @unique
   conversations Conversation[]
+  guestTokens   GuestToken[]
   knowledge     Knowledge[]
+  tenant        Tenant?        @relation(fields: [tenantId], references: [id])
+  reservations  Reservation[]
 
   @@index([tenantId])
+  @@index([phoneNumber])
 }
 
 model Conversation {
-  id         String    @id @default(uuid()) @db.Uuid
-  propertyId String?   @db.Uuid
-  property   Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  id         String             @id @default(uuid()) @db.Uuid
   userPhone  String
-  channel    Channel   @default(whatsapp)
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  propertyId String?            @db.Uuid
+  channel    Channel            @default(whatsapp)
+  status     ConversationStatus @default(ai)
+  property   Property?          @relation(fields: [propertyId], references: [id])
   messages   Message[]
 
   @@index([propertyId, userPhone, channel])
   @@index([propertyId, createdAt])
+  @@index([propertyId, status])
   @@index([userPhone])
 }
 
 model Message {
   id             String       @id @default(uuid()) @db.Uuid
   conversationId String       @db.Uuid
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   from           String
   to             String
   content        String
   role           MessageRole
   createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, createdAt])
   @@index([from, createdAt])
@@ -81,12 +79,74 @@ model Message {
 model Knowledge {
   id         String   @id @default(uuid()) @db.Uuid
   propertyId String   @db.Uuid
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   key        String
   value      String
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@unique([propertyId, key])
   @@index([propertyId])
+}
+
+model Reservation {
+  id          String            @id @default(uuid()) @db.Uuid
+  propertyId  String            @db.Uuid
+  externalId  String?
+  guestName   String
+  guestPhone  String?
+  checkIn     DateTime
+  checkOut    DateTime
+  status      ReservationStatus @default(confirmed)
+  guestCount  Int               @default(1)
+  notes       String?
+  rawData     Json?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  guestTokens GuestToken[]
+  property    Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, externalId])
+  @@index([propertyId, checkIn])
+  @@index([guestPhone])
+  @@index([propertyId, status])
+}
+
+model GuestToken {
+  id            String      @id @default(uuid()) @db.Uuid
+  token         String      @unique @default(uuid())
+  reservationId String      @db.Uuid
+  propertyId    String      @db.Uuid
+  expiresAt     DateTime
+  createdAt     DateTime    @default(now())
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  property      Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([reservationId])
+}
+
+enum MessageRole {
+  user
+  assistant
+}
+
+enum ConversationStatus {
+  ai             // AI is handling all replies
+  awaiting_host  // AI triggered handoff; waiting for host to JOIN or SKIP via WhatsApp
+  host           // Host confirmed — all host WhatsApp replies are forwarded to guest
+  pending        // Host is active but guest sent a new message awaiting host reply
+}
+
+enum Channel {
+  whatsapp
+  sms
+  voice
+}
+
+enum ReservationStatus {
+  confirmed
+  cancelled
+  completed
+  no_show
 }

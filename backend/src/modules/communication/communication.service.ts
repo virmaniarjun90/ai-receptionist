@@ -2,12 +2,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   MESSAGING_PROVIDER,
   MessagingProvider,
+  SendMessageInput,
 } from './providers/messaging.interface';
-
-type SendWhatsAppMessageInput = {
-  to: string;
-  body: string;
-};
 
 @Injectable()
 export class CommunicationService {
@@ -16,7 +12,7 @@ export class CommunicationService {
     private readonly messagingProvider: MessagingProvider,
   ) {}
 
-  async sendWhatsAppMessage(input: SendWhatsAppMessageInput): Promise<void> {
+  async sendWhatsAppMessage(input: SendMessageInput): Promise<void> {
     await this.messagingProvider.sendMessage(input);
   }
 }

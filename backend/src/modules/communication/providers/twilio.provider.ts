@@ -1,50 +1,37 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import axios from 'axios';
-import {
-  MessagingProvider,
-  SendMessageInput,
-} from './messaging.interface';
+import { Inject, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import Twilio from 'twilio';
+import { APP_CONFIG, AppConfig } from '../../../config/app.config';
+import { MessagingProvider, SendMessageInput } from './messaging.interface';
 
 @Injectable()
 export class TwilioProvider implements MessagingProvider {
-  async sendMessage(input: SendMessageInput): Promise<void> {
-    const accountSid = this.requiredEnv('TWILIO_ACCOUNT_SID');
-    const authToken = this.requiredEnv('TWILIO_AUTH_TOKEN');
-    const from = this.requiredEnv('TWILIO_WHATSAPP_NUMBER');
+  private readonly logger = new Logger(TwilioProvider.name);
+  private readonly client: ReturnType<typeof Twilio>;
+  private readonly from: string;
 
-    const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
-    const payload = new URLSearchParams({
-      From: from,
-      To: input.to,
-      Body: input.body,
-    });
+  constructor(@Inject(APP_CONFIG) config: AppConfig) {
+    const { accountSid, authToken, whatsappNumber } = config.twilio;
 
-    try {
-      await axios.post(url, payload, {
-        auth: {
-          username: accountSid,
-          password: authToken,
-        },
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      });
-    } catch (error) {
-      throw new InternalServerErrorException(
-        'MESSAGING_SERVICE_ERROR: Twilio request failed',
+    if (!accountSid || !authToken || !whatsappNumber) {
+      this.logger.warn(
+        'MESSAGING_SERVICE_WARNING: Twilio credentials incomplete — outbound messages will fail',
       );
     }
+
+    this.client = Twilio(accountSid ?? '', authToken ?? '');
+    this.from = whatsappNumber ?? '';
   }
 
-  private requiredEnv(name: string): string {
-    const value = process.env[name];
-
-    if (!value) {
-      throw new InternalServerErrorException(
-        `MESSAGING_SERVICE_ERROR: Missing environment variable ${name}`,
-      );
+  async sendMessage(input: SendMessageInput): Promise<void> {
+    try {
+      await this.client.messages.create({
+        from: input.from ?? this.from,
+        to: input.to,
+        body: input.body,
+      });
+    } catch (error) {
+      this.logger.error('MESSAGING_SERVICE_ERROR: Twilio send failed', error);
+      throw new InternalServerErrorException('MESSAGING_SERVICE_ERROR: Twilio send failed');
     }
-
-    return value;
   }
 }

@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
 import { ClaudeProvider } from './llm/claude.provider';
 import { KimiProvider } from './llm/kimi.provider';
@@ -9,9 +8,7 @@ import { OpenAiProvider } from './llm/openai.provider';
 import { PiiService } from './pii.service';
 import { PromptService } from './prompt.service';
 
-// AiModule isolates LLM-specific behavior from delivery channels like WhatsApp.
 @Module({
-  controllers: [AiController],
   providers: [
     AiService,
     PiiService,
@@ -22,6 +19,6 @@ import { PromptService } from './prompt.service';
     KimiProvider,
     MockProvider,
   ],
-  exports: [AiService, PiiService],
+  exports: [AiService],
 })
 export class AiModule {}

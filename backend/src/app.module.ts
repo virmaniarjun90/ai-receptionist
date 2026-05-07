@@ -1,21 +1,15 @@
 import { Module } from '@nestjs/common';
-import { AiModule } from './modules/ai/ai.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { CommonModule } from './modules/common/common.module';
-import { CommunicationModule } from './modules/communication/communication.module';
-import { ConversationModule } from './modules/conversation/conversation.module';
-import { KnowledgeModule } from './modules/knowledge/knowledge.module';
-import { PropertyModule } from './modules/property/property.module';
-import { QueueModule } from './modules/queue/queue.module';
+import { GuestModule } from './modules/guest/guest.module';
+import { WebhookModule } from './modules/webhook/webhook.module';
 
 @Module({
   imports: [
-    CommonModule,
-    AiModule,
-    PropertyModule,
-    KnowledgeModule,
-    ConversationModule,
-    QueueModule,
-    CommunicationModule,
+    CommonModule,   // @Global — provides APP_CONFIG, PrismaService everywhere
+    WebhookModule,  // → QueueModule → AiModule, CommunicationModule, ConversationModule, KnowledgeModule, PropertyModule, ReservationModule
+    AdminModule,    // → PropertyModule, KnowledgeModule, ReservationModule, ConversationModule, ChannelManagerModule, GuestModule
+    GuestModule,    // public /guest/* routes — registration form + welcome kit
   ],
 })
 export class AppModule {}

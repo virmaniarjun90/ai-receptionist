@@ -1,10 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { APP_CONFIG, AppConfig } from '../../config/app.config';
 import { AiConversationMessage } from './ai.service';
 
 @Injectable()
 export class PiiService {
+  constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
+
   sanitizeMessages(messages: AiConversationMessage[]): AiConversationMessage[] {
-    if (process.env.PII_MASKING_ENABLED === 'false') {
+    if (!this.config.piiMaskingEnabled) {
       return messages;
     }
 
