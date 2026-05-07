@@ -100,6 +100,12 @@ export const api = {
   },
 
   guests: {
+    register: (data: {
+      propertyId: string; guestName: string; guestPhone: string;
+      checkIn: string; checkOut: string; guestCount?: number;
+    }) => request<{ reservationId: string; welcomeUrl: string }>('/guest/register', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
     deleteData: (phone: string) =>
       request<{ phone: string; anonymised: Record<string, number> }>(
         `/admin/guests/${encodeURIComponent(phone)}`,

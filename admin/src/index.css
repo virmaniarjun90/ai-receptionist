@@ -28,6 +28,25 @@ button {
   color: #312e81;
 }
 
+/* Airbnb-style input */
+.airbnb-input {
+  width: 100%;
+  border: 1px solid #EBEBEB;
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 14px;
+  color: #222222;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+  background: white;
+}
+.airbnb-input:focus {
+  border-color: #222222;
+  box-shadow: 0 0 0 2px rgba(34,34,34,0.08);
+}
+.airbnb-input::placeholder { color: #B0B0B0; }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
