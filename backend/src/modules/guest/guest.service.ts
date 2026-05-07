@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { GuestToken, Knowledge, Property, Reservation } from '@prisma/client';
 import { APP_CONFIG, AppConfig } from '../../config/app.config';
 import { PrismaService } from '../common/prisma.service';
@@ -25,6 +25,8 @@ export type WelcomeKitData = {
 
 @Injectable()
 export class GuestService {
+  private readonly logger = new Logger(GuestService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly propertyService: PropertyService,
@@ -56,7 +58,13 @@ export class GuestService {
 
     const welcomeUrl = `${this.config.appUrl}/guest/welcome/${token.token}`;
 
-    await this.sendWelcomeMessage(property, reservation, welcomeUrl, input.guestPhone);
+    try {
+      await this.sendWelcomeMessage(property, reservation, welcomeUrl, input.guestPhone);
+    } catch (err) {
+      // Don't block registration if WhatsApp delivery fails (e.g. sandbox opt-in not done).
+      // Guest can still use the welcomeUrl directly.
+      this.logger.warn(`Welcome message failed for ${input.guestPhone}: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     return { reservation, welcomeUrl };
   }

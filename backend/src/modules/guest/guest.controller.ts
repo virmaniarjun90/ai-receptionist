@@ -42,7 +42,7 @@ export class GuestController {
   }
 
   @Post('register')
-  @ApiOperation({ summary: 'Submit guest registration' })
+  @ApiOperation({ summary: 'Submit guest registration — returns JSON' })
   async register(
     @Body() body: {
       propertyId: string;
@@ -50,7 +50,7 @@ export class GuestController {
       guestPhone: string;
       checkIn: string;
       checkOut: string;
-      guestCount?: string;
+      guestCount?: string | number;
     },
     @Res() res: Response,
   ): Promise<void> {
@@ -65,7 +65,7 @@ export class GuestController {
       throw new BadRequestException('Invalid checkIn or checkOut date');
     }
 
-    const { welcomeUrl } = await this.guestService.register({
+    const { reservation, welcomeUrl } = await this.guestService.register({
       propertyId: body.propertyId,
       guestName: body.guestName,
       guestPhone: body.guestPhone.startsWith('whatsapp:') ? body.guestPhone : `whatsapp:${body.guestPhone}`,
@@ -74,8 +74,7 @@ export class GuestController {
       guestCount: body.guestCount ? Number(body.guestCount) : 1,
     });
 
-    res.setHeader('Content-Type', 'text/html');
-    res.send(this.renderConfirmation(body.guestName, body.guestPhone, welcomeUrl));
+    res.status(201).json({ reservationId: reservation.id, welcomeUrl });
   }
 
   @Get('welcome/:token')
@@ -158,49 +157,34 @@ export class GuestController {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
         });
-        const html = await res.text();
-        document.open(); document.write(html); document.close();
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e.message || 'Registration failed');
+        }
+        const { welcomeUrl } = await res.json();
+        const firstName = data.guestName.split(' ')[0];
+        document.getElementById('form').outerHTML = \`
+          <div class="text-center space-y-4">
+            <div class="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+              <svg class="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+              </svg>
+            </div>
+            <h2 class="text-xl font-bold text-gray-900">You're all set, \${firstName}!</h2>
+            <p class="text-sm text-gray-500">Your welcome guide has been sent to <strong>\${data.guestPhone}</strong> on WhatsApp.</p>
+            <div class="p-4 bg-gray-50 rounded-xl text-left">
+              <p class="text-xs text-gray-400 mb-1 font-medium uppercase tracking-wide">Your welcome guide link</p>
+              <a href="\${welcomeUrl}" class="text-sm text-indigo-600 break-all hover:underline">\${welcomeUrl}</a>
+            </div>
+          </div>\`;
       } catch (ex) {
-        err.textContent = 'Something went wrong. Please try again.';
+        err.textContent = ex.message || 'Something went wrong. Please try again.';
         err.classList.remove('hidden');
         btn.disabled = false;
         btn.textContent = 'Get my welcome guide →';
       }
     });
   </script>
-</body>
-</html>`;
-  }
-
-  private renderConfirmation(guestName: string, phone: string, welcomeUrl: string): string {
-    const firstName = guestName.split(' ')[0];
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>You're all set!</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="min-h-screen bg-gradient-to-br from-indigo-50 to-white flex items-center justify-center p-4">
-  <div class="w-full max-w-md bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
-    <div class="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-      <svg class="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-      </svg>
-    </div>
-    <h1 class="text-2xl font-bold text-gray-900">You're all set, ${firstName}!</h1>
-    <p class="mt-2 text-sm text-gray-500">
-      We've sent your welcome guide to <strong>${phone}</strong> on WhatsApp.
-    </p>
-    <div class="mt-6 p-4 bg-gray-50 rounded-xl text-left">
-      <p class="text-xs text-gray-400 mb-1 font-medium uppercase tracking-wide">Your welcome guide link</p>
-      <a href="${welcomeUrl}" class="text-sm text-indigo-600 break-all hover:underline">${welcomeUrl}</a>
-    </div>
-    <p class="mt-4 text-xs text-gray-400">
-      This link expires at checkout. Bookmark it for easy access during your stay.
-    </p>
-  </div>
 </body>
 </html>`;
   }
