@@ -1,73 +1,181 @@
 # AI Receptionist — Backend
 
-NestJS backend for an AI-powered WhatsApp receptionist for Airbnb hosts and short-term rental properties.
+NestJS backend for an AI-powered WhatsApp receptionist for short-term rental hosts.
 
-## Running locally — quick links
-
-Once the stack is running (see [Quick start](#quick-start) below), open these in your browser:
+## Quick links (when running locally)
 
 | What | URL |
 |---|---|
-| **Admin UI** | http://localhost:5173 |
+| **Admin UI** | http://localhost:5174 |
 | **API health** | http://localhost:3000/health |
 | **Swagger / API docs** | http://localhost:3000/api |
+| **Guest registration form** | http://localhost:3000/guest/register?p=00000000-0000-0000-0000-000000000101 |
 
 ---
 
-## Demo — try it in 30 seconds
+## Guest Onboarding — three modes
 
-> Assumes the stack is already running (`npm run dev` from workspace root).
+Guests need a **Reservation** in the database before the AI can greet them by name. There are three ways to get reservations in:
 
-**1. Send a simulated guest WhatsApp message:**
+---
+
+### Mode 1 — Manual registration form (pilot default)
+
+The host shares a link with each incoming guest. The guest fills in their name, WhatsApp number, and check-in/out dates. The system creates the reservation and sends a WhatsApp welcome message automatically.
+
+**How to get the link:**
+```
+http://<YOUR_APP_URL>/guest/register?p=<PROPERTY_ID>
+```
+
+Find your property ID in the Admin UI under Properties, or from the API:
 ```bash
-curl -X POST http://localhost:3000/webhook/whatsapp \
+curl http://localhost:3000/admin/properties -H "x-admin-key: <ADMIN_API_KEY>"
+# copy the "id" field
+```
+
+**What the form does:**
+1. Guest submits name + WhatsApp number + dates
+2. System creates a `Reservation` record
+3. System creates a `GuestToken` (a one-time-use link, expires at checkout)
+4. System sends the guest a WhatsApp welcome message with their welcome kit link
+5. From that point the AI receptionist is active for that guest on WhatsApp
+
+**Required env var:**
+```env
+APP_URL="https://your-backend-url.com"   # used to build the welcome kit link in the WhatsApp message
+```
+
+---
+
+### Mode 2 — Manual admin entry
+
+The host (or you) creates the reservation directly — no form involved. Two ways to do it:
+
+**Via Admin UI:**
+Admin UI → Properties → select property → Reservations tab → (coming soon: Add Reservation button)
+
+**Via API:**
+```bash
+curl -X POST http://localhost:3000/admin/properties/<PROPERTY_ID>/reservations \
   -H "Content-Type: application/json" \
-  -d '{"Body":"What is the wifi password?","From":"whatsapp:+911234567890","To":"whatsapp:+14155238886"}'
-# → {"status":"queued"}
+  -H "x-admin-key: <ADMIN_API_KEY>" \
+  -d '{
+    "guestName": "Arjun Virmani",
+    "guestPhone": "whatsapp:+918802078873",
+    "checkIn": "2026-05-07T15:00:00Z",
+    "checkOut": "2026-05-12T11:00:00Z",
+    "guestCount": 1
+  }'
 ```
 
-**2. See the AI reply in the Admin UI:**
-Open http://localhost:5173 → click **Conversations** in the sidebar → select the conversation from `+911234567890`.
+Once the reservation exists, the AI automatically greets the guest by name when they first message the property WhatsApp. No welcome message is sent proactively in this mode — the guest has to initiate.
 
-The seeded guest has an active reservation, so the AI greets them by name.
-
-**3. Browse properties and knowledge:**
-Click **Properties** → select *Development Hotel* → **FAQs** tab to see/edit the knowledge the AI uses.
-
-**4. Hit the API directly (Swagger):**
-Open http://localhost:3000/api — all `/admin/*` endpoints are listed with request/response schemas.
+**No extra env vars required.**
 
 ---
 
-## How it works
+### Mode 3 — Channel manager sync (Airbnb / future integrations)
 
-```
-Guest (WhatsApp)
-  → Twilio webhook  POST /webhook/whatsapp
-  → BullMQ job queue (Redis)
-  → QueueProcessor worker
-      ├── Routes to correct Property by incoming WhatsApp number
-      ├── Looks up active Reservation for the guest's phone
-      ├── Loads Property knowledge (FAQs)
-      ├── Builds personalised system prompt (guest name, check-in/out, amenities…)
-      └── Calls LLM → saves reply → sends via Twilio
+Reservations are pulled automatically from your channel manager (Airbnb, Booking.com, etc.) on an hourly cron. No manual input needed once configured.
+
+**Switch to Airbnb:**
+```env
+CHANNEL_MANAGER_PROVIDER="airbnb"
+
+# Option A — access token (simplest, works if you already have partner access)
+AIRBNB_ACCESS_TOKEN="your-airbnb-access-token"
+
+# Option B — OAuth client credentials (for server-to-server apps)
+AIRBNB_CLIENT_ID="your-airbnb-client-id"
+AIRBNB_CLIENT_SECRET="your-airbnb-client-secret"
+
+# Optional: change sync frequency (default: hourly)
+SYNC_CRON="0 * * * *"
 ```
 
-The webhook returns immediately; all AI and Twilio work is async.
+**Important:** Airbnb Partner API access requires approval from Airbnb before you can use it in production. Apply at https://www.airbnb.com/partner. Until approved, keep `CHANNEL_MANAGER_PROVIDER=mock`.
+
+**Trigger sync manually:**
+```bash
+# Sync all properties
+curl -X POST http://localhost:3000/admin/sync -H "x-admin-key: <ADMIN_API_KEY>"
+
+# Sync one property
+curl -X POST http://localhost:3000/admin/properties/<ID>/sync -H "x-admin-key: <ADMIN_API_KEY>"
+```
+
+**Adding a new channel manager** (Booking.com, Hostaway, Guesty, etc.):
+1. Create `backend/src/modules/channel-manager/providers/<name>.provider.ts`
+2. Implement the `ChannelManagerProvider` interface (two methods: `getListingDetails`, `getReservations`)
+3. Register it in `channel-manager.module.ts`
+4. Add the provider name to `ChannelManagerProviderName` in `app.config.ts`
 
 ---
 
-## Tech stack
+## LLM Provider
 
-| Layer | Tech |
+The AI brain behind the receptionist. Switch via `LLM_PROVIDER` env var.
+
+| Provider | Env var value | Required keys |
+|----------|--------------|---------------|
+| Mock (demo, no API key) | `mock` | none |
+| Claude (Anthropic) | `claude` | `ANTHROPIC_API_KEY` |
+| GPT-4o (OpenAI) | `openai` | `OPENAI_API_KEY` |
+| Kimi (Moonshot) | `kimi` | `KIMI_API_KEY` |
+
+The mock provider reads from the property's knowledge base and supports the full handoff flow — useful for demos and development without API costs.
+
+If a provider is selected but its API key is missing, the system automatically falls back to mock and logs a warning.
+
+**Switch to Claude for production:**
+```env
+LLM_PROVIDER="claude"
+ANTHROPIC_API_KEY="sk-ant-..."
+CLAUDE_MODEL="claude-sonnet-4-6"   # optional — this is the default
+```
+
+---
+
+## WhatsApp / Twilio setup
+
+```env
+TWILIO_ACCOUNT_SID="ACxxx"
+TWILIO_AUTH_TOKEN="xxx"
+TWILIO_WHATSAPP_NUMBER="whatsapp:+14155238886"   # your Twilio sandbox or production number
+HOST_WHATSAPP_NUMBER="whatsapp:+91XXXXXXXXXX"    # host's personal WhatsApp (receives handoff alerts)
+TWILIO_VALIDATE_WEBHOOK="false"                  # set true in production
+```
+
+**Twilio webhook URL** (set this in your Twilio console for the WhatsApp number):
+```
+https://your-backend-url.com/webhook/whatsapp
+```
+Method: `POST`
+
+For local dev use [ngrok](https://ngrok.com) to expose port 3000:
+```bash
+ngrok http 3000
+# paste the https URL + /webhook/whatsapp into Twilio console
+```
+
+---
+
+## Host takeover (WhatsApp-native, no app required)
+
+When the AI can't answer, it:
+1. Sends the guest a warm message: *"Let me connect you with the host."*
+2. Sends the host a WhatsApp alert with the guest's question
+3. Host replies `JOIN` → directly relays with guest through the property number
+4. Host replies `DONE` → AI takes back over
+
+| Host command | Effect |
 |---|---|
-| Framework | NestJS + TypeScript |
-| Database | PostgreSQL via Prisma |
-| Queue | BullMQ + Redis |
-| LLM | OpenAI / Claude (Anthropic) / Kimi (Moonshot) / Mock |
-| Messaging | Twilio WhatsApp |
-| Channel manager | Airbnb API (or Mock for dev) |
-| Admin UI | React + Vite (in `../admin/`) |
+| `join` / `yes` | Accept takeover, connect with guest |
+| `skip` / `no` | Decline, AI retries with fallback |
+| `done` / `back` / `/ai` | Hand conversation back to AI |
+
+The host works entirely from their own WhatsApp. No app, no login.
 
 ---
 
@@ -78,143 +186,128 @@ The webhook returns immediately; all AI and Twilio work is async.
 docker run -d -p 5432:5432 -e POSTGRES_DB=ai_receptionist -e POSTGRES_PASSWORD=postgres postgres:15
 docker run -d -p 6379:6379 redis:7
 
-# 2. Install and configure
+# 2. Configure
 cd backend
 npm install
-cp .env.example .env        # fill in your keys
-# For local dev: set TWILIO_VALIDATE_WEBHOOK=false in .env so curl commands work without a real Twilio signature
+cp .env.example .env
+# Edit .env — at minimum set DATABASE_URL and TWILIO_* vars
 
 # 3. Database
 npx prisma migrate deploy
 npx prisma generate
-npx ts-node prisma/seed.ts  # creates default property + knowledge + sample reservation
+npx ts-node -r tsconfig-paths/register prisma/seed.ts
 
-# 4. Run (from workspace root — starts backend + admin UI together)
-cd ..
-npm install
-npm run dev
+# 4. Run
+npm run start:dev
 ```
-
-| Service | URL |
-|---|---|
-| Backend API | http://localhost:3000 |
-| Swagger docs | http://localhost:3000/api |
-| Admin UI | http://localhost:5173 |
 
 ---
 
-## Environment variables
+## Environment variables — full reference
 
 ```env
-# Required
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ai_receptionist?schema=public"
+# ─── Database ─────────────────────────────────────────────────────────────────
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ai_receptionist"
+
+# ─── Redis ────────────────────────────────────────────────────────────────────
 REDIS_HOST="localhost"
 REDIS_PORT="6379"
 
-# LLM — pick one: mock | openai | claude | kimi
+# ─── LLM — pick one: mock | claude | openai | kimi ───────────────────────────
 LLM_PROVIDER="mock"
-OPENAI_API_KEY=""           # required when LLM_PROVIDER=openai
 ANTHROPIC_API_KEY=""        # required when LLM_PROVIDER=claude
+CLAUDE_MODEL="claude-sonnet-4-6"
+OPENAI_API_KEY=""           # required when LLM_PROVIDER=openai
+OPENAI_MODEL="gpt-4o-mini"
 KIMI_API_KEY=""             # required when LLM_PROVIDER=kimi
+KIMI_MODEL="moonshot-v1-8k"
 
-# Twilio
+# ─── Twilio ───────────────────────────────────────────────────────────────────
 TWILIO_ACCOUNT_SID=""
 TWILIO_AUTH_TOKEN=""
 TWILIO_WHATSAPP_NUMBER="whatsapp:+14155238886"
-TWILIO_VALIDATE_WEBHOOK="false"   # set true in production
+HOST_WHATSAPP_NUMBER="whatsapp:+91XXXXXXXXXX"   # host's personal number
+TWILIO_VALIDATE_WEBHOOK="false"                 # set true in production
 
-# Channel manager — mock | airbnb
+# ─── Guest onboarding ─────────────────────────────────────────────────────────
+# APP_URL is used to build the welcome kit link sent to guests via WhatsApp
+APP_URL="http://localhost:3000"
+
+# ─── Channel manager — pick one: mock | airbnb ───────────────────────────────
 CHANNEL_MANAGER_PROVIDER="mock"
-AIRBNB_ACCESS_TOKEN=""      # quickest option for Airbnb
-AIRBNB_CLIENT_ID=""         # alternative: client credentials OAuth
+AIRBNB_ACCESS_TOKEN=""      # use this OR client credentials below
+AIRBNB_CLIENT_ID=""
 AIRBNB_CLIENT_SECRET=""
-SYNC_CRON="0 * * * *"       # how often to auto-sync (default: hourly)
+SYNC_CRON="0 * * * *"       # how often to auto-sync (default: every hour)
 
-# Admin UI
-ADMIN_API_KEY=""             # leave empty = open in dev; set to protect /admin/* in prod
-CORS_ORIGIN="http://localhost:5173"
+# ─── Admin API ────────────────────────────────────────────────────────────────
+# Leave empty = open access in local dev. Set a strong secret in production.
+ADMIN_API_KEY=""
+
+# ─── Misc ─────────────────────────────────────────────────────────────────────
+PORT="3000"
+PII_MASKING_ENABLED="true"  # never sends guest phone/email to the LLM
 ```
 
 ---
 
-## Modules
+## Module overview
 
-| Module | Responsibility |
+| Module | What it does |
 |---|---|
-| `WebhookModule` | Inbound Twilio webhook + signature validation |
-| `QueueModule` | BullMQ job producer + worker processor |
-| `AiModule` | LLM abstraction: OpenAI, Claude, Kimi, Mock |
-| `CommunicationModule` | Outbound Twilio WhatsApp send |
-| `ChannelManagerModule` | Sync from Airbnb / Mock + hourly cron |
-| `ReservationModule` | Guest reservation CRUD + phone lookup |
-| `PropertyModule` | Multi-property CRUD + phone-based routing |
+| `WebhookModule` | Receives inbound Twilio webhooks, validates signature |
+| `QueueModule` | BullMQ producer + worker — processes all messages async |
+| `AiModule` | LLM abstraction (Claude / OpenAI / Kimi / Mock) + prompt builder |
+| `CommunicationModule` | Outbound WhatsApp sends via Twilio |
+| `ChannelManagerModule` | Airbnb / Mock sync + hourly cron |
+| `GuestModule` | Registration form, welcome kit page, guest token management |
+| `ReservationModule` | Reservation CRUD, active-stay lookup by phone |
+| `PropertyModule` | Multi-property CRUD, phone-based routing |
 | `KnowledgeModule` | Per-property FAQ key-value store |
-| `ConversationModule` | Message history persistence |
-| `AdminModule` | Protected admin REST API (`/admin/*`) |
+| `ConversationModule` | Message history, status management |
+| `AdminModule` | Protected REST API for all admin operations |
 | `CommonModule` | PrismaService, AppConfig, health check (global) |
 
 ---
 
-## Multi-property routing
+## Admin API — key endpoints
 
-Each property has a `phoneNumber` column (e.g. `whatsapp:+14155238886`). When a guest messages, the `To` field from Twilio is matched to a property. If no match is found, the system falls back to the default property seeded by `prisma/seed.ts`.
+Requires `x-admin-key: <ADMIN_API_KEY>` header (when key is set).
 
-To add a second property: create it via `POST /admin/properties` with its own `phoneNumber`, then configure a second Twilio number pointing at the same webhook.
-
----
-
-## Swappable providers
-
-Everything external is behind an interface:
-
-| What | Interface | How to switch |
-|---|---|---|
-| LLM | `LlmProvider` | `LLM_PROVIDER=openai\|claude\|kimi\|mock` |
-| Messaging | `MessagingProvider` | Wire new class in `CommunicationModule` |
-| Channel manager | `ChannelManagerProvider` | `CHANNEL_MANAGER_PROVIDER=mock\|airbnb` |
-
-Adding a new LLM: implement `LlmProvider`, register in `AiModule`, add a case to `LlmFactory`.
-
----
-
-## Channel manager sync
-
-`POST /admin/properties/:id/sync` — manual trigger for one property.
-`POST /admin/sync` — trigger all properties.
-Automatic: cron runs every hour (configurable via `SYNC_CRON`).
-
-The `AirbnbProvider` requires either `AIRBNB_ACCESS_TOKEN` (simplest) or `AIRBNB_CLIENT_ID` + `AIRBNB_CLIENT_SECRET`. Airbnb Partner API access must be approved at https://www.airbnb.com/partner before using it.
-
----
-
-## Admin API
-
-All endpoints under `/admin/*`. Protected by `X-Admin-Key` header when `ADMIN_API_KEY` is set (open in dev if unset).
-
-Full interactive docs at `http://localhost:3000/api`.
-
-Key endpoints:
+Full interactive docs: http://localhost:3000/api
 
 ```
+# Properties
 GET    /admin/properties
 POST   /admin/properties
 PATCH  /admin/properties/:id
 DELETE /admin/properties/:id
-POST   /admin/properties/:id/sync
+POST   /admin/properties/:id/sync        trigger channel manager sync
 
+# Knowledge base
 GET    /admin/properties/:id/knowledge
-POST   /admin/properties/:id/knowledge       { key, value }
+POST   /admin/properties/:id/knowledge   { key, value }
 DELETE /admin/properties/:id/knowledge/:key
 
+# Reservations
 GET    /admin/properties/:id/reservations
 POST   /admin/properties/:id/reservations
 PATCH  /admin/reservations/:id
 POST   /admin/reservations/:id/cancel
 
+# Conversations
 GET    /admin/conversations
 GET    /admin/conversations/:id
-POST   /admin/sync                           triggers full sync for all properties
+POST   /admin/conversations/:id/takeover   admin-triggered host mode
+POST   /admin/conversations/:id/handback   return to AI
 
+# GDPR
+DELETE /admin/guests/:phone              anonymise all data for a phone number
+
+# Sync
+POST   /admin/sync                       sync all properties
+
+# Health
 GET    /health
 ```
 
@@ -222,10 +315,11 @@ GET    /health
 
 ## Production checklist
 
-- [ ] Set `TWILIO_VALIDATE_WEBHOOK=true`
-- [ ] Set `ADMIN_API_KEY` to a strong secret
-- [ ] Set `CORS_ORIGIN` to your deployed admin UI domain
-- [ ] Use managed Redis (Upstash, Redis Cloud, AWS ElastiCache)
-- [ ] Run `npx prisma migrate deploy` as part of deployment (not `migrate dev`)
-- [ ] Set `LLM_PROVIDER` to your chosen production provider and add the API key
-- [ ] Set `CHANNEL_MANAGER_PROVIDER=airbnb` once Airbnb Partner access is approved
+- [ ] `TWILIO_VALIDATE_WEBHOOK=true`
+- [ ] `ADMIN_API_KEY` set to a strong random string
+- [ ] `LLM_PROVIDER=claude` (or openai) with real API key
+- [ ] `APP_URL` set to your deployed backend URL
+- [ ] `HOST_WHATSAPP_NUMBER` set to the host's real number
+- [ ] `CHANNEL_MANAGER_PROVIDER=airbnb` once partner access is approved
+- [ ] Use managed Redis (Upstash / Redis Cloud / AWS ElastiCache)
+- [ ] Run `npx prisma migrate deploy` on each deploy (not `migrate dev`)

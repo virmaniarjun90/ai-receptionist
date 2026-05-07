@@ -78,26 +78,55 @@ async function main(): Promise<void> {
     });
   }
 
-  // Sample reservation so guest phone-lookup works end-to-end in local dev.
+  // Guest 1 — Arjun (registered via manual form, check-in today)
   await prisma.reservation.upsert({
-    where: { propertyId_externalId: { propertyId: property.id, externalId: 'DEV-RES-001' } },
-    update: {},
+    where: { propertyId_externalId: { propertyId: property.id, externalId: 'DEMO-ARJUN-001' } },
+    update: {
+      guestName: 'Arjun Virmani',
+      guestPhone: 'whatsapp:+918802078873',
+      checkIn: new Date('2026-05-07T15:00:00Z'),
+      checkOut: new Date('2026-05-12T11:00:00Z'),
+      status: 'confirmed',
+    },
     create: {
       propertyId: property.id,
-      externalId: 'DEV-RES-001',
-      guestName: 'Sarah Johnson',
-      guestPhone: 'whatsapp:+911234567890',
+      externalId: 'DEMO-ARJUN-001',
+      guestName: 'Arjun Virmani',
+      guestPhone: 'whatsapp:+918802078873',
+      checkIn: new Date('2026-05-07T15:00:00Z'),
+      checkOut: new Date('2026-05-12T11:00:00Z'),
+      status: 'confirmed',
+      guestCount: 1,
+      notes: 'Registered via pilot form.',
+    },
+  });
+
+  // Guest 2 — Kunal (registered via manual form, check-in today)
+  await prisma.reservation.upsert({
+    where: { propertyId_externalId: { propertyId: property.id, externalId: 'DEMO-KUNAL-001' } },
+    update: {
+      guestName: 'Kunal',
+      guestPhone: 'whatsapp:+918570846127',
+      checkIn: new Date('2026-05-07T15:00:00Z'),
+      checkOut: new Date('2026-05-12T11:00:00Z'),
+      status: 'confirmed',
+    },
+    create: {
+      propertyId: property.id,
+      externalId: 'DEMO-KUNAL-001',
+      guestName: 'Kunal',
+      guestPhone: 'whatsapp:+918570846127',
       checkIn: new Date('2026-05-07T15:00:00Z'),
       checkOut: new Date('2026-05-12T11:00:00Z'),
       status: 'confirmed',
       guestCount: 2,
-      notes: 'Couple celebrating anniversary. Requested late checkout.',
+      notes: 'Registered via pilot form.',
     },
   });
 
   console.log(
     `Seeded: tenant "${tenant.name}", property "${property.name}", ` +
-    `${knowledgeEntries.length} knowledge entries, 1 sample reservation.`,
+    `${knowledgeEntries.length} knowledge entries, 2 demo reservations (Arjun + Kunal).`,
   );
 }
 
