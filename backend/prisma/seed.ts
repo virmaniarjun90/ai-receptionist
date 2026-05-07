@@ -22,6 +22,7 @@ async function main(): Promise<void> {
     where: { id: DEFAULT_PROPERTY_ID },
     update: {
       hostPhone: process.env.HOST_WHATSAPP_NUMBER ?? 'whatsapp:+15550000001',
+      phoneNumber: process.env.TWILIO_WHATSAPP_NUMBER ?? null,
     },
     create: {
       id: DEFAULT_PROPERTY_ID,

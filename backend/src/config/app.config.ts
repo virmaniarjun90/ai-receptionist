@@ -5,6 +5,8 @@
  */
 export interface AppConfig {
   port: number;
+  appMode: AppModeName;
+  demoAllowedNumbers: string[];
   redis: {
     host: string;
     port: number;
@@ -39,12 +41,21 @@ export interface AppConfig {
 
 export type LlmProviderName = 'openai' | 'claude' | 'kimi' | 'mock';
 export type ChannelManagerProviderName = 'mock' | 'airbnb';
+export type AppModeName = 'demo' | 'pilot' | 'production';
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
 export function buildAppConfig(): AppConfig {
+  const rawAllowed = process.env.DEMO_ALLOWED_NUMBERS ?? '';
+  const demoAllowedNumbers = rawAllowed
+    .split(',')
+    .map((n) => n.trim())
+    .filter(Boolean);
+
   return {
     port: Number(process.env.PORT ?? 3000),
+    appMode: (process.env.APP_MODE ?? 'demo') as AppModeName,
+    demoAllowedNumbers,
     redis: {
       host: process.env.REDIS_HOST ?? 'localhost',
       port: Number(process.env.REDIS_PORT ?? 6379),

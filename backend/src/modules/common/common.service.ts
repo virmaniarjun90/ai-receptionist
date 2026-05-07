@@ -9,6 +9,7 @@ export type DependencyHealth = {
 
 export type HealthStatus = {
   status: 'ok' | 'degraded';
+  appMode: string;
   dependencies: {
     db: DependencyHealth;
     redis: DependencyHealth;
@@ -35,7 +36,7 @@ export class CommonService {
     };
 
     const status = Object.values(dependencies).every((d) => d.status === 'ok') ? 'ok' : 'degraded';
-    return { status, dependencies };
+    return { status, appMode: this.config.appMode, dependencies };
   }
 
   private async checkDb(): Promise<DependencyHealth> {

@@ -52,6 +52,7 @@ export type SyncResult = {
 
 export type Health = {
   status: string;
+  appMode?: string;
   dependencies: Record<string, { status: string; detail?: string }>;
 };
 

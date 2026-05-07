@@ -8,6 +8,8 @@ export class TwilioProvider implements MessagingProvider {
   private readonly logger = new Logger(TwilioProvider.name);
   private readonly client: ReturnType<typeof Twilio>;
   private readonly from: string;
+  private readonly appMode: string;
+  private readonly demoAllowedNumbers: Set<string>;
 
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
     const { accountSid, authToken, whatsappNumber } = config.twilio;
@@ -20,9 +22,25 @@ export class TwilioProvider implements MessagingProvider {
 
     this.client = Twilio(accountSid ?? '', authToken ?? '');
     this.from = whatsappNumber ?? '';
+    this.appMode = config.appMode;
+    this.demoAllowedNumbers = new Set(config.demoAllowedNumbers);
   }
 
   async sendMessage(input: SendMessageInput): Promise<void> {
+    if (this.appMode === 'demo' && this.demoAllowedNumbers.size > 0) {
+      const normalized = input.to.replace(/^whatsapp:/, '');
+      const allowed = [...this.demoAllowedNumbers].some(
+        (n) => n.replace(/^whatsapp:/, '') === normalized,
+      );
+      if (!allowed) {
+        this.logger.warn(
+          `DEMO_MODE: Skipping send to ${input.to} — not in DEMO_ALLOWED_NUMBERS. ` +
+          `To receive messages, the number must opt in to the Twilio sandbox first.`,
+        );
+        return;
+      }
+    }
+
     try {
       await this.client.messages.create({
         from: input.from ?? this.from,
