@@ -191,42 +191,58 @@ fi
 echo ""
 echo -e "${BOLD}6. Starting services${RESET}"
 
-# Kill any stale processes on our ports
-lsof -ti :3000 | xargs kill -9 2>/dev/null || true
-lsof -ti :5173 | xargs kill -9 2>/dev/null || true
-lsof -ti :5174 | xargs kill -9 2>/dev/null || true
-sleep 1
-
-# Start backend
-info "Starting backend..."
-cd "$BACKEND"
-npm run start:dev > /tmp/ai-receptionist-backend.log 2>&1 &
-BACKEND_PID=$!
-
-# Wait for backend to be ready
-echo -n "     Waiting for backend"
-for i in {1..20}; do
+# ── Backend ───────────────────────────────────────────────────────────────────
+if curl -s http://localhost:3000/health 2>/dev/null | grep -q '"status":"ok"'; then
+  ok "Backend already running at http://localhost:3000 — skipping start"
+  BACKEND_PID=$(lsof -ti :3000 | head -1)
+else
+  # Only kill the port if nothing healthy is there
+  lsof -ti :3000 | xargs kill -9 2>/dev/null || true
   sleep 1
-  echo -n "."
-  if curl -s http://localhost:3000/health | grep -q '"status":"ok"'; then
-    echo ""
-    ok "Backend ready at http://localhost:3000"
+
+  info "Starting backend..."
+  cd "$BACKEND"
+  npm run start:dev > /tmp/ai-receptionist-backend.log 2>&1 &
+  BACKEND_PID=$!
+
+  echo -n "     Waiting for backend"
+  for i in {1..20}; do
+    sleep 1
+    echo -n "."
+    if curl -s http://localhost:3000/health 2>/dev/null | grep -q '"status":"ok"'; then
+      echo ""
+      ok "Backend ready at http://localhost:3000"
+      break
+    fi
+    if [ $i -eq 20 ]; then
+      echo ""
+      fail "Backend didn't start — check /tmp/ai-receptionist-backend.log"
+    fi
+  done
+fi
+
+# ── Admin UI ──────────────────────────────────────────────────────────────────
+ADMIN_PID=""
+ADMIN_PORT=""
+
+for port in 5173 5174 5175; do
+  if curl -s http://localhost:$port 2>/dev/null | grep -q "html\|vite\|AI Receptionist" || \
+     lsof -ti :$port &>/dev/null; then
+    ok "Admin UI already running at http://localhost:$port — skipping start"
+    ADMIN_PORT=$port
+    ADMIN_PID=$(lsof -ti :$port | head -1)
     break
-  fi
-  if [ $i -eq 20 ]; then
-    echo ""
-    fail "Backend didn't start — check /tmp/ai-receptionist-backend.log"
   fi
 done
 
-# Start admin UI
-info "Starting admin UI..."
-cd "$ADMIN"
-npm run dev > /tmp/ai-receptionist-admin.log 2>&1 &
-ADMIN_PID=$!
-
-sleep 3
-ADMIN_PORT=$(grep -oP '(?<=localhost:)\d+' /tmp/ai-receptionist-admin.log | head -1)
+if [ -z "$ADMIN_PORT" ]; then
+  info "Starting admin UI..."
+  cd "$ADMIN"
+  npm run dev > /tmp/ai-receptionist-admin.log 2>&1 &
+  ADMIN_PID=$!
+  sleep 4
+  ADMIN_PORT=$(grep -oP '(?<=localhost:)\d+' /tmp/ai-receptionist-admin.log | head -1)
+fi
 ADMIN_PORT="${ADMIN_PORT:-5173}"
 ok "Admin UI ready at http://localhost:$ADMIN_PORT"
 
