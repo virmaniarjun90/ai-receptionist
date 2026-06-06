@@ -421,11 +421,13 @@ function ReservationsPanel({ propertyId }: { propertyId: string }) {
   const [items, setItems] = useState<Reservation[]>([]);
   const [error, setError] = useState('');
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const load = () => api.reservations.list(propertyId).then(setItems).catch((e) => setError(String(e)));
   useEffect(() => { void load(); }, [propertyId]);
 
   const handleCancel = async (id: string) => {
+    if (!confirm('Cancel this reservation?')) return;
     setCancelling(id);
     try { await api.reservations.cancel(id); void load(); }
     catch (e) { setError(String(e)); }
@@ -440,12 +442,34 @@ function ReservationsPanel({ propertyId }: { propertyId: string }) {
           {error}
         </div>
       )}
+
+      <div className="flex justify-end">
+        <button
+          onClick={() => setAdding(true)}
+          className="inline-flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+          Add reservation
+        </button>
+      </div>
+
+      {adding && (
+        <ReservationForm
+          onSave={async (data) => {
+            await api.reservations.create(propertyId, data);
+            setAdding(false);
+            void load();
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      )}
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {items.length === 0 ? (
           <div className="py-12 text-center">
             <svg className="w-8 h-8 text-slate-200 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>
             <p className="text-sm text-slate-400">No reservations yet</p>
-            <p className="text-xs text-slate-400 mt-1">Sync your channel manager to pull them in</p>
+            <p className="text-xs text-slate-400 mt-1">Add one manually or sync your channel manager</p>
           </div>
         ) : (
           <table className="w-full text-sm">
@@ -468,7 +492,7 @@ function ReservationsPanel({ propertyId }: { propertyId: string }) {
                       {r.guestName}
                       {r.guestCount > 1 && <span className="text-slate-400 font-normal ml-1.5 text-xs">×{r.guestCount}</span>}
                     </td>
-                    <td className="px-5 py-3.5 text-slate-500 text-xs">{r.guestPhone ?? '—'}</td>
+                    <td className="px-5 py-3.5 text-slate-500 text-xs">{r.guestPhone?.replace('whatsapp:', '') ?? '—'}</td>
                     <td className="px-5 py-3.5 text-slate-600">{new Date(r.checkIn).toLocaleDateString()}</td>
                     <td className="px-5 py-3.5 text-slate-600">{new Date(r.checkOut).toLocaleDateString()}</td>
                     <td className="px-5 py-3.5">
@@ -493,6 +517,129 @@ function ReservationsPanel({ propertyId }: { propertyId: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+// ─── Reservation Form ───────────────────────────────────────────────────────
+
+function ReservationForm({
+  onSave,
+  onCancel,
+}: {
+  onSave: (data: Partial<Reservation>) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const today = new Date().toISOString().split('T')[0];
+  const [form, setForm] = useState<{
+    guestName: string; guestPhone: string; checkIn: string; checkOut: string;
+    guestCount: string; notes: string;
+  }>({ guestName: '', guestPhone: '', checkIn: today, checkOut: '', guestCount: '1', notes: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.guestName.trim() || !form.checkIn || !form.checkOut) return;
+    if (form.checkOut <= form.checkIn) { setError('Check-out must be after check-in.'); return; }
+    setSaving(true); setError('');
+    try {
+      const phone = form.guestPhone.trim();
+      await onSave({
+        guestName: form.guestName.trim(),
+        guestPhone: phone ? (phone.startsWith('whatsapp:') ? phone : `whatsapp:${phone}`) : undefined,
+        checkIn: form.checkIn,
+        checkOut: form.checkOut,
+        guestCount: parseInt(form.guestCount, 10) || 1,
+        notes: form.notes.trim() || undefined,
+      });
+    } catch (err) { setError(String(err)); setSaving(false); }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+      <p className="text-sm font-semibold text-slate-800">New reservation</p>
+      {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs text-slate-500 font-medium mb-1.5">Guest name <span className="text-red-400">*</span></label>
+          <input
+            value={form.guestName}
+            onChange={(e) => set('guestName', e.target.value)}
+            placeholder="Sarah Johnson"
+            required
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent transition-shadow"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 font-medium mb-1.5">Guest WhatsApp number</label>
+          <input
+            value={form.guestPhone}
+            onChange={(e) => set('guestPhone', e.target.value)}
+            placeholder="+919876543210"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent transition-shadow"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 font-medium mb-1.5">Check-in <span className="text-red-400">*</span></label>
+          <input
+            type="date"
+            value={form.checkIn}
+            onChange={(e) => set('checkIn', e.target.value)}
+            required
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent transition-shadow"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 font-medium mb-1.5">Check-out <span className="text-red-400">*</span></label>
+          <input
+            type="date"
+            value={form.checkOut}
+            min={form.checkIn}
+            onChange={(e) => set('checkOut', e.target.value)}
+            required
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent transition-shadow"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 font-medium mb-1.5">Guests</label>
+          <input
+            type="number"
+            min="1"
+            max="20"
+            value={form.guestCount}
+            onChange={(e) => set('guestCount', e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent transition-shadow"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 font-medium mb-1.5">Notes</label>
+          <input
+            value={form.notes}
+            onChange={(e) => set('notes', e.target.value)}
+            placeholder="Anniversary trip, late checkout..."
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent transition-shadow"
+          />
+        </div>
+      </div>
+      <div className="flex gap-3">
+        <button
+          type="submit"
+          disabled={saving || !form.guestName || !form.checkIn || !form.checkOut}
+          className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+        >
+          {saving ? 'Saving…' : 'Add reservation'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 

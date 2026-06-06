@@ -1,11 +1,21 @@
+import { useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
+import { api } from './api';
 import { Layout } from './components/Layout';
 import { Conversations } from './pages/Conversations';
 import { Dashboard } from './pages/Dashboard';
 import { GuestRegistration } from './pages/GuestRegistration';
+import { Login } from './pages/Login';
 import { Properties } from './pages/Properties';
 
 export default function App() {
+  const [authed, setAuthed] = useState(() => api.auth.isLoggedIn());
+
+  const handleLogout = () => {
+    api.auth.logout();
+    setAuthed(false);
+  };
+
   return (
     <Routes>
       {/* Public — no sidebar, no auth */}
@@ -15,13 +25,17 @@ export default function App() {
       <Route
         path="/*"
         element={
-          <Layout>
-            {(page, setPage) => {
-              if (page === 'properties') return <Properties />;
-              if (page === 'conversations') return <Conversations />;
-              return <Dashboard onNavigate={setPage} />;
-            }}
-          </Layout>
+          !authed ? (
+            <Login onLogin={() => setAuthed(true)} />
+          ) : (
+            <Layout onLogout={handleLogout}>
+              {(page, setPage) => {
+                if (page === 'properties') return <Properties />;
+                if (page === 'conversations') return <Conversations />;
+                return <Dashboard onNavigate={setPage} />;
+              }}
+            </Layout>
+          )
         }
       />
     </Routes>

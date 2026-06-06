@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, Conversation, ConversationStatus } from '../api';
 
 const STATUS_CONFIG: Record<ConversationStatus, { label: string; dot: string; bg: string; text: string }> = {
@@ -18,8 +18,10 @@ function StatusBadge({ status }: { status: ConversationStatus }) {
   );
 }
 
-function Avatar({ phone }: { phone: string }) {
-  const initials = phone.replace('whatsapp:+', '').replace('+', '').slice(-2);
+function Avatar({ name, phone }: { name?: string | null; phone: string }) {
+  const initials = name
+    ? name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase()
+    : phone.replace('whatsapp:+', '').replace('+', '').slice(-2);
   return (
     <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 text-xs font-bold text-indigo-600">
       {initials}
@@ -34,6 +36,10 @@ export function Conversations() {
   const [error, setError] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
 
+  // Keep a ref so the polling interval can always see the latest selected state
+  const selectedRef = useRef<Conversation | null>(null);
+  selectedRef.current = selected;
+
   const loadList = () =>
     api.conversations.list()
       .then(setList)
@@ -42,6 +48,22 @@ export function Conversations() {
 
   useEffect(() => { void loadList(); }, []);
 
+  // Poll every 10 s — refresh the detail if one is open, otherwise refresh the list
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (selectedRef.current) {
+        void api.conversations.get(selectedRef.current.id)
+          .then(setSelected)
+          .catch(() => {});
+      } else {
+        void api.conversations.list()
+          .then(setList)
+          .catch(() => {});
+      }
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, []);
+
   const handleSelect = async (id: string) => {
     try { setSelected(await api.conversations.get(id)); }
     catch (e) { setError(String(e)); }
@@ -49,6 +71,7 @@ export function Conversations() {
 
   const handleTakeover = async () => {
     if (!selected) return;
+    if (!confirm('Take over this conversation? The AI will stop responding and you\'ll be notified on WhatsApp to reply directly.')) return;
     setActionBusy(true);
     try {
       await api.conversations.takeover(selected.id);
@@ -71,7 +94,8 @@ export function Conversations() {
 
   const handleDeleteGuestData = async () => {
     if (!selected) return;
-    if (!confirm(`Permanently erase all personal data for ${selected.userPhone}? This cannot be undone.`)) return;
+    const name = selected.guestName ?? selected.userPhone;
+    if (!confirm(`Permanently erase all personal data for ${name}? This cannot be undone.`)) return;
     setActionBusy(true);
     try {
       await api.guests.deleteData(selected.userPhone);
@@ -84,6 +108,7 @@ export function Conversations() {
   if (selected) {
     const isHostActive = selected.status === 'host' || selected.status === 'pending' || selected.status === 'awaiting_host';
     const displayPhone = selected.userPhone.replace('whatsapp:', '');
+    const displayName = selected.guestName ?? displayPhone;
 
     return (
       <div className="max-w-2xl space-y-4">
@@ -107,13 +132,14 @@ export function Conversations() {
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
-              <Avatar phone={selected.userPhone} />
+              <Avatar name={selected.guestName} phone={selected.userPhone} />
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="font-semibold text-slate-900">{displayPhone}</p>
+                  <p className="font-semibold text-slate-900">{displayName}</p>
                   <StatusBadge status={selected.status} />
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5">
+                  {selected.guestName && <span className="mr-2">{displayPhone}</span>}
                   {selected.property?.name ?? 'Unknown property'} · {new Date(selected.createdAt).toLocaleString()}
                 </p>
               </div>
@@ -200,9 +226,11 @@ export function Conversations() {
 
   return (
     <div className="max-w-4xl space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Conversations</h1>
-        <p className="text-sm text-slate-400 mt-0.5">All guest interactions across your properties</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Conversations</h1>
+          <p className="text-sm text-slate-400 mt-0.5">All guest interactions · refreshes every 10 s</p>
+        </div>
       </div>
 
       {error && (
@@ -247,8 +275,15 @@ export function Conversations() {
                   >
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-2.5">
-                        <Avatar phone={c.userPhone} />
-                        <span className="font-medium text-slate-800">{c.userPhone.replace('whatsapp:', '')}</span>
+                        <Avatar name={c.guestName} phone={c.userPhone} />
+                        <div>
+                          <p className="font-medium text-slate-800">
+                            {c.guestName ?? c.userPhone.replace('whatsapp:', '')}
+                          </p>
+                          {c.guestName && (
+                            <p className="text-xs text-slate-400">{c.userPhone.replace('whatsapp:', '')}</p>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="px-5 py-3.5 text-slate-500">{c.property?.name ?? '—'}</td>

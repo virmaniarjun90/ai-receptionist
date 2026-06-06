@@ -1,12 +1,16 @@
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
-const ADMIN_KEY = import.meta.env.VITE_ADMIN_KEY ?? '';
+
+function getAdminKey(): string {
+  return localStorage.getItem('admin_key') ?? import.meta.env.VITE_ADMIN_KEY ?? '';
+}
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const key = getAdminKey();
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(ADMIN_KEY ? { 'x-admin-key': ADMIN_KEY } : {}),
+      ...(key ? { 'x-admin-key': key } : {}),
       ...options.headers,
     },
   });
@@ -41,7 +45,7 @@ export type ConversationStatus = 'ai' | 'awaiting_host' | 'host' | 'pending';
 
 export type Conversation = {
   id: string; userPhone: string; channel: string; createdAt: string;
-  status: ConversationStatus;
+  status: ConversationStatus; guestName?: string | null;
   property?: Property; messages: Message[];
 };
 
@@ -116,5 +120,20 @@ export const api = {
 
   sync: {
     all: () => request<void>('/admin/sync', { method: 'POST' }),
+  },
+
+  auth: {
+    isLoggedIn: () => getAdminKey().length > 0,
+    login: async (key: string): Promise<boolean> => {
+      localStorage.setItem('admin_key', key);
+      try {
+        await request<Property[]>('/admin/properties');
+        return true;
+      } catch {
+        localStorage.removeItem('admin_key');
+        return false;
+      }
+    },
+    logout: () => localStorage.removeItem('admin_key'),
   },
 };

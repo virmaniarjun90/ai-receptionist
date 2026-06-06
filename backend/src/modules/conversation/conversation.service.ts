@@ -111,16 +111,34 @@ export class ConversationService {
     }
   }
 
-  async listConversations(): Promise<
-    Prisma.ConversationGetPayload<{
-      include: { property: true; messages: { take: 1; orderBy: { createdAt: 'desc' } } };
-    }>[]
-  > {
+  async listConversations() {
     try {
-      return await this.prisma.conversation.findMany({
+      const conversations = await this.prisma.conversation.findMany({
         include: { property: true, messages: { take: 1, orderBy: { createdAt: 'desc' } } },
         orderBy: { updatedAt: 'desc' },
       });
+
+      const phones = [...new Set(conversations.map((c) => c.userPhone).filter((p) => p !== '[deleted]'))];
+      const reservations = phones.length
+        ? await this.prisma.reservation.findMany({
+            where: { guestPhone: { in: phones }, status: 'confirmed' },
+            select: { guestPhone: true, guestName: true, propertyId: true },
+          })
+        : [];
+
+      const nameMap = new Map<string, string>();
+      for (const r of reservations) {
+        if (r.guestPhone) {
+          nameMap.set(`${r.guestPhone}|${r.propertyId}`, r.guestName);
+          if (!nameMap.has(r.guestPhone)) nameMap.set(r.guestPhone, r.guestName);
+        }
+      }
+
+      return conversations.map((c) => ({
+        ...c,
+        guestName:
+          nameMap.get(`${c.userPhone}|${c.propertyId}`) ?? nameMap.get(c.userPhone) ?? null,
+      }));
     } catch (error) {
       throw new InternalServerErrorException(
         'CONVERSATION_SERVICE_ERROR: DB conversations query failed',
@@ -128,16 +146,27 @@ export class ConversationService {
     }
   }
 
-  async getConversationById(id: string): Promise<
-    Prisma.ConversationGetPayload<{
-      include: { property: true; messages: { orderBy: { createdAt: 'asc' } } };
-    }>
-  > {
+  async getConversationById(id: string) {
     try {
-      return await this.prisma.conversation.findUniqueOrThrow({
+      const conversation = await this.prisma.conversation.findUniqueOrThrow({
         where: { id },
         include: { property: true, messages: { orderBy: { createdAt: 'asc' } } },
       });
+
+      const guestName = conversation.userPhone !== '[deleted]'
+        ? await this.prisma.reservation
+            .findFirst({
+              where: {
+                guestPhone: conversation.userPhone,
+                ...(conversation.propertyId ? { propertyId: conversation.propertyId } : {}),
+                status: 'confirmed',
+              },
+              select: { guestName: true },
+            })
+            .then((r) => r?.guestName ?? null)
+        : null;
+
+      return { ...conversation, guestName };
     } catch (error) {
       throw new NotFoundException(`Conversation ${id} not found`);
     }

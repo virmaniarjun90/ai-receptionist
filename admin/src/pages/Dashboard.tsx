@@ -103,10 +103,13 @@ export function Dashboard({ onNavigate }: { onNavigate: (p: 'properties' | 'conv
           </svg>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-amber-900">Demo mode — Twilio Sandbox active</p>
-            <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
-              Messages only send to numbers that have opted in by texting <span className="font-mono font-semibold">join &lt;word&gt;</span> to the sandbox number.
+            <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+              <strong>AI replies are silently blocked</strong> for any number not in <span className="font-mono">DEMO_ALLOWED_NUMBERS</span> — those guests will receive no response even though the conversation appears in this dashboard.
+              Numbers must opt in by texting <span className="font-mono font-semibold">join &lt;word&gt;</span> to the sandbox number first.
               Sandbox limit: 50 messages/day (resets midnight UTC).
-              Switch to <span className="font-semibold">APP_MODE=pilot</span> with a real Twilio number to remove these restrictions.
+            </p>
+            <p className="text-xs text-amber-600 mt-2 font-medium">
+              → Set <span className="font-mono">APP_MODE=pilot</span> with a real Twilio number to lift all restrictions.
             </p>
           </div>
         </div>
