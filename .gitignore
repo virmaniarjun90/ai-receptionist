@@ -1,26 +1,24 @@
-# Dependencies
+# ─── Dependencies ─────────────────────────────────────────────────────────────
 node_modules/
 
-# Build output
+# ─── Build output ─────────────────────────────────────────────────────────────
 dist/
 build/
 
-# Environment files — never commit secrets
+# ─── Environment files — never commit secrets ─────────────────────────────────
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!**/.env.example
 
-# Logs
+# ─── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 npm-debug.log*
 
-# Claude Code local settings
+# ─── Tool-specific local config ───────────────────────────────────────────────
 .claude/
+.codex/
 
-# OS
+# ─── OS ───────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-
-# Prisma generated
-backend/node_modules/
-admin/node_modules/
