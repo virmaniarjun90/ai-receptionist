@@ -107,6 +107,16 @@ export type SystemConfig = {
     cm1ChannelId: string | null;
     cm1ApiKeySet: boolean;
   };
+  database: {
+    url: string | null;
+    urlSet: boolean;
+  };
+  redis: {
+    host: string;
+    port: number;
+    passwordSet: boolean;
+    tls: boolean;
+  };
 };
 
 // ─── Properties ───────────────────────────────────────────────────────────────

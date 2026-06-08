@@ -517,6 +517,39 @@ export function Config() {
         )}
       </Section>
 
+      {/* Database */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Database</p>
+          <span className="text-xs text-slate-400">Change via env vars · restart required</span>
+        </div>
+        <Row label="Connection">
+          <StatusDot ok={cfg.database.urlSet} />
+          {cfg.database.url
+            ? <span className="font-mono text-xs text-slate-500 truncate max-w-xs">{cfg.database.url}</span>
+            : <span className="text-red-600 text-xs">DATABASE_URL not set</span>}
+        </Row>
+      </div>
+
+      {/* Redis */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Redis</p>
+          <span className="text-xs text-slate-400">Change via env vars · restart required</span>
+        </div>
+        <Row label="Host">
+          <span className="font-mono text-xs text-slate-600">{cfg.redis.host}:{cfg.redis.port}</span>
+        </Row>
+        <Row label="Password">
+          <StatusDot ok={cfg.redis.passwordSet} warn={!cfg.redis.passwordSet} />
+          <span>{cfg.redis.passwordSet ? 'Set' : 'Not set'}</span>
+        </Row>
+        <Row label="TLS">
+          <StatusDot ok={cfg.redis.tls} warn={!cfg.redis.tls} />
+          <span>{cfg.redis.tls ? 'Enabled' : 'Disabled (enable for cloud Redis)'}</span>
+        </Row>
+      </div>
+
       <ConfirmModal
         open={confirmOpen}
         onConfirm={handleConfirm}

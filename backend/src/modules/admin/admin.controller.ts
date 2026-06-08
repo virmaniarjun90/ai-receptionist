@@ -29,6 +29,10 @@ function maskSecret(value: string): string {
   return value.slice(0, 4) + '••••••••' + value.slice(-4);
 }
 
+function maskDatabaseUrl(url: string): string {
+  return url.replace(/(:\/\/[^:]+:)([^@]+)(@)/, '$1••••••••$3');
+}
+
 @ApiTags('Admin')
 @ApiHeader({ name: 'x-admin-key', description: 'Admin API key (required when ADMIN_API_KEY is set)', required: false })
 @UseGuards(AdminGuard)
@@ -94,6 +98,16 @@ export class AdminController {
         ),
         cm1ChannelId: this.config.channelManager.cm1ChannelId ?? null,
         cm1ApiKeySet: !!this.config.channelManager.cm1ApiKey,
+      },
+      database: {
+        url: this.config.database.url ? maskDatabaseUrl(this.config.database.url) : null,
+        urlSet: !!this.config.database.url,
+      },
+      redis: {
+        host: this.config.redis.host,
+        port: this.config.redis.port,
+        passwordSet: !!this.config.redis.password,
+        tls: this.config.redis.tls,
       },
     };
   }

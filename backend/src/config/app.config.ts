@@ -7,6 +7,9 @@ export interface AppConfig {
   port: number;
   appMode: AppModeName;
   demoAllowedNumbers: string[];
+  database: {
+    url: string;
+  };
   redis: {
     host: string;
     port: number;
@@ -60,6 +63,9 @@ export function buildAppConfig(): AppConfig {
     port: Number(process.env.PORT ?? 3000),
     appMode: (process.env.APP_MODE ?? 'demo') as AppModeName,
     demoAllowedNumbers,
+    database: {
+      url: process.env.DATABASE_URL ?? '',
+    },
     redis: {
       host: process.env.REDIS_HOST ?? 'localhost',
       port: Number(process.env.REDIS_PORT ?? 6379),
