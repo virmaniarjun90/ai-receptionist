@@ -42,7 +42,12 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   // Apply any DB-persisted config overrides on top of .env values.
-  await app.get(SettingsService).loadAndApply();
+  // Non-fatal: if DB is unreachable at startup, .env values are used as-is.
+  try {
+    await app.get(SettingsService).loadAndApply();
+  } catch {
+    console.warn('Could not load DB settings at startup — using .env values only');
+  }
 
   await app.listen(config.port);
   console.log(`Server running on port ${config.port} — Swagger at http://localhost:${config.port}/api`);

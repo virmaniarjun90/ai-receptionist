@@ -11,7 +11,7 @@ export class ClaudeProvider implements LlmProvider {
   private readonly model: string;
 
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
-    this.client = new Anthropic({ apiKey: config.llm.anthropicApiKey });
+    this.client = new Anthropic({ apiKey: config.llm.anthropicApiKey ?? 'placeholder' });
     this.model = config.llm.claudeModel;
   }
 

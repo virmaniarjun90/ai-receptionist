@@ -14,7 +14,7 @@ export class KimiProvider implements LlmProvider {
 
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
     this.client = new OpenAI({
-      apiKey: config.llm.kimiApiKey,
+      apiKey: config.llm.kimiApiKey ?? 'placeholder',
       baseURL: 'https://api.moonshot.cn/v1',
     });
     this.model = config.llm.kimiModel;
