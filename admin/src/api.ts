@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+const BASE = import.meta.env.VITE_API_URL ?? '';
 
 function getAdminKey(): string {
   return localStorage.getItem('admin_key') ?? import.meta.env.VITE_ADMIN_KEY ?? '';
