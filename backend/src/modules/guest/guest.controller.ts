@@ -13,6 +13,11 @@ import { Response } from 'express';
 import { PropertyService } from '../property/property.service';
 import { GuestService } from './guest.service';
 
+function normalizeWhatsAppNumber(phone: string): string {
+  const clean = phone.trim().replace(/\s+/g, '');
+  return clean.startsWith('whatsapp:') ? clean : `whatsapp:${clean}`;
+}
+
 @ApiTags('Guest')
 @Controller('guest')
 export class GuestController {
@@ -67,8 +72,8 @@ export class GuestController {
 
     const { reservation, welcomeUrl } = await this.guestService.register({
       propertyId: body.propertyId,
-      guestName: body.guestName,
-      guestPhone: body.guestPhone.startsWith('whatsapp:') ? body.guestPhone : `whatsapp:${body.guestPhone}`,
+      guestName: body.guestName.trim(),
+      guestPhone: normalizeWhatsAppNumber(body.guestPhone),
       checkIn,
       checkOut,
       guestCount: body.guestCount ? Number(body.guestCount) : 1,
@@ -114,9 +119,9 @@ export class GuestController {
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">WhatsApp number</label>
-        <input name="guestPhone" required placeholder="+1 234 567 8900" type="tel"
+        <input name="guestPhone" required placeholder="+918570846127" type="tel"
           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-        <p class="mt-1 text-xs text-gray-400">Include country code, e.g. +91 98765 43210</p>
+        <p class="mt-1 text-xs text-gray-400">Include country code, no spaces — e.g. +918570846127</p>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div>
@@ -163,6 +168,11 @@ export class GuestController {
         }
         const { welcomeUrl } = await res.json();
         const firstName = data.guestName.split(' ')[0];
+        const guideBlock = welcomeUrl ? \`
+          <div class="p-4 bg-gray-50 rounded-xl text-left">
+            <p class="text-xs text-gray-400 mb-1 font-medium uppercase tracking-wide">Your welcome guide</p>
+            <a href="\${welcomeUrl}" class="text-sm text-indigo-600 break-all hover:underline">\${welcomeUrl}</a>
+          </div>\` : '';
         document.getElementById('form').outerHTML = \`
           <div class="text-center space-y-4">
             <div class="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto">
@@ -171,11 +181,8 @@ export class GuestController {
               </svg>
             </div>
             <h2 class="text-xl font-bold text-gray-900">You're all set, \${firstName}!</h2>
-            <p class="text-sm text-gray-500">Your welcome guide has been sent to <strong>\${data.guestPhone}</strong> on WhatsApp.</p>
-            <div class="p-4 bg-gray-50 rounded-xl text-left">
-              <p class="text-xs text-gray-400 mb-1 font-medium uppercase tracking-wide">Your welcome guide link</p>
-              <a href="\${welcomeUrl}" class="text-sm text-indigo-600 break-all hover:underline">\${welcomeUrl}</a>
-            </div>
+            <p class="text-sm text-gray-500">A welcome message has been sent to <strong>\${data.guestPhone}</strong> on WhatsApp.</p>
+            \${guideBlock}
           </div>\`;
       } catch (ex) {
         err.textContent = ex.message || 'Something went wrong. Please try again.';

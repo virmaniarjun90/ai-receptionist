@@ -8,6 +8,7 @@ import { PropertyModule } from '../property/property.module';
 import { ReservationModule } from '../reservation/reservation.module';
 import { AdminController } from './admin.controller';
 import { AdminGuard } from './admin.guard';
+import { SettingsService } from './settings.service';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { AdminGuard } from './admin.guard';
     GuestModule,
   ],
   controllers: [AdminController],
-  providers: [AdminGuard],
+  providers: [AdminGuard, SettingsService],
+  exports: [SettingsService],
 })
 export class AdminModule {}

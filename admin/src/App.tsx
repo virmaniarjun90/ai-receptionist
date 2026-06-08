@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { api } from './api';
 import { Layout } from './components/Layout';
+import { Config } from './pages/Config';
 import { Conversations } from './pages/Conversations';
 import { Dashboard } from './pages/Dashboard';
 import { GuestRegistration } from './pages/GuestRegistration';
@@ -32,6 +33,7 @@ export default function App() {
               {(page, setPage) => {
                 if (page === 'properties') return <Properties />;
                 if (page === 'conversations') return <Conversations />;
+                if (page === 'config') return <Config />;
                 return <Dashboard onNavigate={setPage} />;
               }}
             </Layout>

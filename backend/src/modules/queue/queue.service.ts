@@ -15,7 +15,13 @@ export type HostForwardJobPayload = {
   message: string;
 };
 
-type JobPayload = ProcessMessageJobPayload | HostForwardJobPayload;
+export type HostTimeoutJobPayload = {
+  conversationId: string;
+  propertyPhone: string;
+  userPhone: string;
+};
+
+type JobPayload = ProcessMessageJobPayload | HostForwardJobPayload | HostTimeoutJobPayload;
 
 @Injectable()
 export class QueueService {
@@ -53,6 +59,20 @@ export class QueueService {
     } catch (error) {
       this.logger.error('QUEUE_ERROR: Redis enqueue failed', error instanceof Error ? error.stack : String(error));
       throw new ServiceUnavailableException('QUEUE_ERROR: Redis enqueue failed');
+    }
+  }
+
+  async addHostTimeoutJob(payload: HostTimeoutJobPayload, delayMs: number): Promise<void> {
+    try {
+      await this.messageQueue.add('host-timeout', payload, {
+        delay: delayMs,
+        attempts: 1,
+        removeOnComplete: true,
+        removeOnFail: true,
+      });
+      this.logger.log(`Host-timeout scheduled in ${delayMs}ms for conversation ${payload.conversationId}`);
+    } catch (error) {
+      this.logger.error('QUEUE_ERROR: Redis enqueue failed', error instanceof Error ? error.stack : String(error));
     }
   }
 }

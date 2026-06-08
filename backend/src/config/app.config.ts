@@ -31,6 +31,8 @@ export interface AppConfig {
     airbnbClientId?: string;
     airbnbClientSecret?: string;
     airbnbAccessToken?: string;
+    cm1ApiKey?: string;
+    cm1ChannelId?: string;
   };
   admin: {
     apiKey?: string;
@@ -40,7 +42,7 @@ export interface AppConfig {
 }
 
 export type LlmProviderName = 'openai' | 'claude' | 'kimi' | 'mock';
-export type ChannelManagerProviderName = 'mock' | 'airbnb';
+export type ChannelManagerProviderName = 'mock' | 'airbnb' | 'cm1';
 export type AppModeName = 'demo' | 'pilot' | 'production';
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -81,6 +83,8 @@ export function buildAppConfig(): AppConfig {
       airbnbClientId: process.env.AIRBNB_CLIENT_ID,
       airbnbClientSecret: process.env.AIRBNB_CLIENT_SECRET,
       airbnbAccessToken: process.env.AIRBNB_ACCESS_TOKEN,
+      cm1ApiKey: process.env.CM1_API_KEY,
+      cm1ChannelId: process.env.CM1_CHANNEL_ID,
     },
     admin: {
       apiKey: process.env.ADMIN_API_KEY,
@@ -102,6 +106,11 @@ export function validateConfig(config: AppConfig): void {
   }
   if (config.llm.provider === 'kimi' && !config.llm.kimiApiKey) {
     errors.push('KIMI_API_KEY is required when LLM_PROVIDER=kimi');
+  }
+  if (config.channelManager.provider === 'cm1') {
+    if (!config.channelManager.cm1ApiKey || !config.channelManager.cm1ChannelId) {
+      errors.push('CHANNEL_MANAGER_PROVIDER=cm1 requires CM1_API_KEY and CM1_CHANNEL_ID');
+    }
   }
   if (config.channelManager.provider === 'airbnb') {
     const hasToken = !!config.channelManager.airbnbAccessToken;
