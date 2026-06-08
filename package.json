@@ -7,7 +7,7 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:admin\" --names \"backend,admin\" --prefix-colors \"cyan,magenta\"",
     "dev:backend": "npm --prefix backend run start:dev",
     "dev:admin": "npm --prefix admin run dev",
-    "build": "npm --prefix backend install --include=dev && npm --prefix admin install && npm --prefix backend run build && npm --prefix admin run build",
+    "build": "npm --prefix backend install --include=dev && npm --prefix admin install --include=dev && npm --prefix backend run build && npm --prefix admin run build",
     "start": "npm --prefix backend run start:prod",
     "prisma:generate": "npm --prefix backend run prisma:generate",
     "prisma:migrate": "npm --prefix backend run prisma:migrate",
