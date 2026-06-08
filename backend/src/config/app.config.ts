@@ -10,6 +10,8 @@ export interface AppConfig {
   redis: {
     host: string;
     port: number;
+    password?: string;
+    tls: boolean;
   };
   llm: {
     provider: LlmProviderName;
@@ -61,6 +63,8 @@ export function buildAppConfig(): AppConfig {
     redis: {
       host: process.env.REDIS_HOST ?? 'localhost',
       port: Number(process.env.REDIS_PORT ?? 6379),
+      password: process.env.REDIS_PASSWORD,
+      tls: process.env.REDIS_TLS === 'true',
     },
     llm: {
       provider: (process.env.LLM_PROVIDER ?? 'mock') as LlmProviderName,

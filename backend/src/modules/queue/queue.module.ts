@@ -18,6 +18,8 @@ import { QueueService } from './queue.service';
         connection: {
           host: config.redis.host,
           port: config.redis.port,
+          password: config.redis.password,
+          ...(config.redis.tls ? { tls: {} } : {}),
           maxRetriesPerRequest: null,
         },
       }),
