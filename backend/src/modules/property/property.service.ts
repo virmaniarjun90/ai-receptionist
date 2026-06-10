@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
-import { Prisma, Property } from '@prisma/client';
+import { Prisma, Property, PropertyHost } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { DEFAULT_PROPERTY_ID } from './property.constants';
 
@@ -17,7 +17,7 @@ export const DEFAULT_PROPERTY_FEATURES: PropertyFeatures = {
   hostRelay: true,
   budgetQuota: true,
   budgetLimitUsd: 2.0,
-  hostAvailabilityTimeoutMin: 5,
+  hostAvailabilityTimeoutMin: 3,
   guestGuide: false,
   proactiveMessaging: false,
   menuSharing: false,
@@ -39,7 +39,6 @@ export type CreatePropertyInput = {
   description?: string;
   address?: string;
   phone?: string;
-  hostPhone?: string;
   phoneNumber?: string;
   externalId?: string;
   checkInTime?: string;
@@ -50,6 +49,11 @@ export type CreatePropertyInput = {
 };
 
 export type UpdatePropertyInput = Partial<CreatePropertyInput>;
+
+export type CreatePropertyHostInput = {
+  name: string;
+  phone: string;
+};
 
 @Injectable()
 export class PropertyService {
@@ -101,7 +105,6 @@ export class PropertyService {
           description: input.description ?? null,
           address: input.address ?? null,
           phone: input.phone ?? null,
-          hostPhone: input.hostPhone ? normalizePhone(input.hostPhone) : null,
           phoneNumber: input.phoneNumber ?? null,
           externalId: input.externalId ?? null,
           checkInTime: input.checkInTime ?? null,
@@ -126,7 +129,6 @@ export class PropertyService {
         ...(input.description !== undefined && { description: input.description }),
         ...(input.address !== undefined && { address: input.address }),
         ...(input.phone !== undefined && { phone: input.phone }),
-        ...(input.hostPhone !== undefined && { hostPhone: input.hostPhone ? normalizePhone(input.hostPhone) : null }),
         ...(input.phoneNumber !== undefined && { phoneNumber: input.phoneNumber }),
         ...(input.externalId !== undefined && { externalId: input.externalId }),
         ...(input.checkInTime !== undefined && { checkInTime: input.checkInTime }),
@@ -147,6 +149,49 @@ export class PropertyService {
       await this.prisma.property.delete({ where: { id } });
     } catch (error) {
       throw new InternalServerErrorException('PROPERTY_SERVICE_ERROR: DB property delete failed');
+    }
+  }
+
+  // ─── Hosts ────────────────────────────────────────────────────────────────────
+
+  async listHosts(propertyId: string): Promise<PropertyHost[]> {
+    await this.getById(propertyId);
+    try {
+      return await this.prisma.propertyHost.findMany({
+        where: { propertyId },
+        orderBy: { createdAt: 'asc' },
+      });
+    } catch (error) {
+      throw new InternalServerErrorException('PROPERTY_SERVICE_ERROR: DB hosts query failed');
+    }
+  }
+
+  async addHost(propertyId: string, input: CreatePropertyHostInput): Promise<PropertyHost> {
+    await this.getById(propertyId);
+    const phone = input.phone.startsWith('whatsapp:') ? input.phone : `whatsapp:${input.phone}`;
+    try {
+      return await this.prisma.propertyHost.create({
+        data: { propertyId, name: input.name, phone },
+      });
+    } catch (error) {
+      throw new InternalServerErrorException('PROPERTY_SERVICE_ERROR: DB host insert failed');
+    }
+  }
+
+  async removeHost(propertyId: string, hostId: string): Promise<void> {
+    try {
+      await this.prisma.propertyHost.delete({ where: { id: hostId, propertyId } });
+    } catch (error) {
+      throw new NotFoundException(`Host ${hostId} not found for property ${propertyId}`);
+    }
+  }
+
+  /** Used in queue processor to check if an inbound sender is a registered host. */
+  async getHostsForProperty(propertyId: string): Promise<PropertyHost[]> {
+    try {
+      return await this.prisma.propertyHost.findMany({ where: { propertyId } });
+    } catch (error) {
+      throw new InternalServerErrorException('PROPERTY_SERVICE_ERROR: DB hosts lookup failed');
     }
   }
 }

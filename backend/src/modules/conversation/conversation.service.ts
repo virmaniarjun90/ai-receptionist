@@ -1,5 +1,5 @@
 import { Inject, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
-import { Channel, Conversation, ConversationStatus, Message, MessageRole, Prisma } from '@prisma/client';
+import { Channel, Conversation, ConversationStatus, Message, MessageRole } from '@prisma/client';
 import { APP_CONFIG, AppConfig } from '../../config/app.config';
 import { PrismaService } from '../common/prisma.service';
 
@@ -42,6 +42,19 @@ export class ConversationService {
     } catch (error) {
       throw new InternalServerErrorException(
         'CONVERSATION_SERVICE_ERROR: Status update failed',
+      );
+    }
+  }
+
+  async setActiveHost(conversationId: string, hostPhone: string | null): Promise<Conversation> {
+    try {
+      return await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: { activeHostPhone: hostPhone },
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'CONVERSATION_SERVICE_ERROR: Active host update failed',
       );
     }
   }
@@ -134,10 +147,23 @@ export class ConversationService {
         }
       }
 
+      // Resolve activeHostPhone → name for dashboard display
+      const activePhones = [...new Set(
+        conversations.map((c) => c.activeHostPhone).filter((p): p is string => !!p),
+      )];
+      const activeHosts = activePhones.length
+        ? await this.prisma.propertyHost.findMany({
+            where: { phone: { in: activePhones } },
+            select: { phone: true, name: true },
+          })
+        : [];
+      const hostNameMap = new Map(activeHosts.map((h) => [h.phone, h.name]));
+
       return conversations.map((c) => ({
         ...c,
         guestName:
           nameMap.get(`${c.userPhone}|${c.propertyId}`) ?? nameMap.get(c.userPhone) ?? null,
+        activeHostName: c.activeHostPhone ? (hostNameMap.get(c.activeHostPhone) ?? null) : null,
       }));
     } catch (error) {
       throw new InternalServerErrorException(
@@ -166,7 +192,19 @@ export class ConversationService {
             .then((r) => r?.guestName ?? null)
         : null;
 
-      return { ...conversation, guestName };
+      const activeHostName = conversation.activeHostPhone
+        ? await this.prisma.propertyHost
+            .findFirst({
+              where: {
+                phone: conversation.activeHostPhone,
+                ...(conversation.propertyId ? { propertyId: conversation.propertyId } : {}),
+              },
+              select: { name: true },
+            })
+            .then((h) => h?.name ?? null)
+        : null;
+
+      return { ...conversation, guestName, activeHostName };
     } catch (error) {
       throw new NotFoundException(`Conversation ${id} not found`);
     }

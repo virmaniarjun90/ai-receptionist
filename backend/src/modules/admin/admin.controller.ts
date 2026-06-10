@@ -12,14 +12,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Knowledge, Message, Property, Reservation } from '@prisma/client';
+import { Knowledge, Message, Property, PropertyHost, Reservation } from '@prisma/client';
 import { APP_CONFIG, AppConfig } from '../../config/app.config';
 import { SyncService, SyncResult } from '../channel-manager/sync.service';
 import { SyncScheduler } from '../channel-manager/sync.scheduler';
 import { CommunicationService } from '../communication/communication.service';
 import { ConversationService } from '../conversation/conversation.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
-import { PropertyService, CreatePropertyInput, UpdatePropertyInput } from '../property/property.service';
+import { PropertyService, CreatePropertyInput, CreatePropertyHostInput, UpdatePropertyInput } from '../property/property.service';
 import { ReservationService, CreateReservationInput, UpdateReservationInput } from '../reservation/reservation.service';
 import { AdminGuard } from './admin.guard';
 import { SettingsService } from './settings.service';
@@ -194,6 +194,33 @@ export class AdminController {
     return this.knowledgeService.delete(propertyId, key);
   }
 
+  // ─── Hosts ──────────────────────────────────────────────────────────────────
+
+  @Get('properties/:id/hosts')
+  @ApiOperation({ summary: 'List all hosts for a property' })
+  listHosts(@Param('id') propertyId: string): Promise<PropertyHost[]> {
+    return this.propertyService.listHosts(propertyId);
+  }
+
+  @Post('properties/:id/hosts')
+  @ApiOperation({ summary: 'Add a host to a property' })
+  addHost(
+    @Param('id') propertyId: string,
+    @Body() input: CreatePropertyHostInput,
+  ): Promise<PropertyHost> {
+    return this.propertyService.addHost(propertyId, input);
+  }
+
+  @Delete('properties/:id/hosts/:hostId')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Remove a host from a property' })
+  removeHost(
+    @Param('id') propertyId: string,
+    @Param('hostId') hostId: string,
+  ): Promise<void> {
+    return this.propertyService.removeHost(propertyId, hostId);
+  }
+
   // ─── Reservations ───────────────────────────────────────────────────────────
 
   @Get('properties/:id/reservations')
@@ -272,20 +299,25 @@ export class AdminController {
   })
   async takeoverConversation(@Param('id') id: string) {
     const conversation = await this.conversationService.getConversationById(id);
-    await this.conversationService.setStatus(id, 'host');
-
     const property = conversation.property;
-    const lastMsg = conversation.messages.at(-1);
 
-    if (property?.hostPhone) {
+    await this.conversationService.setStatus(id, 'awaiting_host');
+    await this.conversationService.setActiveHost(id, null);
+
+    if (property) {
+      const hosts = await this.propertyService.getHostsForProperty(property.id);
+      const lastMsg = conversation.messages.at(-1);
       const context = lastMsg ? `\nLast guest message: "${lastMsg.content}"` : '';
-      await this.communicationService.sendWhatsAppMessage({
-        to: property.hostPhone,
-        body:
-          `[${property.name ?? 'Property'}] You have taken over the conversation with ${conversation.userPhone}.${context}\n\n` +
-          `Reply here to message the guest directly.\nSend "/ai" to hand back to the AI assistant.`,
-        from: property.phoneNumber ?? undefined,
-      });
+
+      for (const host of hosts) {
+        await this.communicationService.sendWhatsAppMessage({
+          to: host.phone,
+          body:
+            `Hi ${host.name}! [${property.name ?? 'Property'}] Admin requested host takeover for ${conversation.userPhone}.${context}\n\n` +
+            `Reply JOIN to assist the guest directly, or SKIP to let the AI handle it.\nSend DONE when finished.`,
+          from: property.phoneNumber ?? undefined,
+        });
+      }
     }
 
     await this.communicationService.sendWhatsAppMessage({
@@ -294,13 +326,14 @@ export class AdminController {
       from: property?.phoneNumber ?? undefined,
     });
 
-    return { status: 'host', conversationId: id };
+    return { status: 'awaiting_host', conversationId: id };
   }
 
   @Post('conversations/:id/handback')
   @ApiOperation({ summary: 'Hand conversation back to AI assistant' })
   async handbackConversation(@Param('id') id: string) {
     await this.conversationService.setStatus(id, 'ai');
+    await this.conversationService.setActiveHost(id, null);
 
     const conversation = await this.conversationService.getConversationById(id);
     await this.communicationService.sendWhatsAppMessage({

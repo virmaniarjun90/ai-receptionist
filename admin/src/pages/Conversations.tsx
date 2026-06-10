@@ -192,7 +192,7 @@ export function Conversations() {
           <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3.5">
             <svg className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>
             <div className="text-sm text-blue-800">
-              <strong>Host active.</strong> All host WhatsApp replies are forwarded to the guest.
+              <strong>Host active{selected.activeHostName ? ` — ${selected.activeHostName}` : ''}.</strong> All replies are forwarded to the guest.
               Host sends <code className="bg-blue-100 px-1 py-0.5 rounded text-xs">DONE</code> on WhatsApp to hand back to AI.
             </div>
           </div>
@@ -287,7 +287,14 @@ export function Conversations() {
                       </div>
                     </td>
                     <td className="px-5 py-3.5 text-slate-500">{c.property?.name ?? '—'}</td>
-                    <td className="px-5 py-3.5"><StatusBadge status={c.status ?? 'ai'} /></td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex flex-col gap-0.5">
+                        <StatusBadge status={c.status ?? 'ai'} />
+                        {c.activeHostName && (
+                          <span className="text-xs text-slate-400 pl-0.5">{c.activeHostName}</span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-5 py-3.5 text-slate-400 max-w-xs truncate">{c.messages?.[0]?.content ?? '—'}</td>
                     <td className="px-5 py-3.5 text-slate-400 whitespace-nowrap">{new Date(c.createdAt).toLocaleDateString()}</td>
                     <td className="px-5 py-3.5">

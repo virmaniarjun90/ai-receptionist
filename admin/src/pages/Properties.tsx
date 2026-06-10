@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, DEFAULT_PROPERTY_FEATURES, Knowledge, Property, PropertyFeatures, Reservation, SyncResult } from '../api';
+import { api, DEFAULT_PROPERTY_FEATURES, Knowledge, Property, PropertyFeatures, PropertyHost, Reservation, SyncResult } from '../api';
 
 // ─── Property Card ─────────────────────────────────────────────────────────
 
@@ -140,12 +140,17 @@ export function Properties() {
 // ─── Property Detail ────────────────────────────────────────────────────────
 
 function PropertyDetail({ property, onBack }: { property: Property; onBack: () => void }) {
-  const [tab, setTab] = useState<'info' | 'knowledge' | 'reservations' | 'settings'>('info');
+  const [tab, setTab] = useState<'info' | 'hosts' | 'knowledge' | 'reservations' | 'settings'>('info');
   const [editing, setEditing] = useState(false);
   const [current, setCurrent] = useState(property);
+  const [hostsCount, setHostsCount] = useState(0);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.hosts.list(current.id).then((h) => setHostsCount(h.length)).catch(() => {});
+  }, [current.id]);
 
   const handleSync = async () => {
     setSyncing(true); setSyncResult(null); setError('');
@@ -162,6 +167,7 @@ function PropertyDetail({ property, onBack }: { property: Property; onBack: () =
 
   const tabs = [
     { id: 'info' as const, label: 'Info' },
+    { id: 'hosts' as const, label: 'Hosts' },
     { id: 'knowledge' as const, label: 'Knowledge / FAQs' },
     { id: 'reservations' as const, label: 'Reservations' },
     { id: 'settings' as const, label: 'Settings' },
@@ -233,11 +239,13 @@ function PropertyDetail({ property, onBack }: { property: Property; onBack: () =
           ? <PropertyForm initial={current} onSave={async (d) => { const u = await api.properties.update(current.id, d); setCurrent(u); setEditing(false); }} onCancel={() => setEditing(false)} />
           : <PropertyInfo property={current} onEdit={() => setEditing(true)} />
       )}
+      {tab === 'hosts' && <HostsPanel propertyId={current.id} onCountChange={setHostsCount} />}
       {tab === 'knowledge' && <KnowledgePanel propertyId={current.id} />}
       {tab === 'reservations' && <ReservationsPanel propertyId={current.id} />}
       {tab === 'settings' && (
         <SettingsPanel
           property={current}
+          hasHosts={hostsCount > 0}
           onSave={(updated) => setCurrent(updated)}
         />
       )}
@@ -272,7 +280,6 @@ function PropertyInfo({ property: p, onEdit }: { property: Property; onEdit: () 
         {row('Type', p.type)}
         {row('Address', p.address)}
         {row('Contact Phone', p.phone)}
-        {row('Host WhatsApp', p.hostPhone)}
         {row('WhatsApp Number', p.phoneNumber)}
         {row('Channel Manager ID', p.externalId)}
         {row('Check-in', p.checkInTime)}
@@ -307,6 +314,114 @@ function PropertyInfo({ property: p, onEdit }: { property: Property; onEdit: () 
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Hosts Panel ────────────────────────────────────────────────────────────
+
+function HostsPanel({ propertyId, onCountChange }: { propertyId: string; onCountChange: (n: number) => void }) {
+  const [hosts, setHosts] = useState<PropertyHost[]>([]);
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = () => api.hosts.list(propertyId).then((h) => { setHosts(h); onCountChange(h.length); }).catch((e) => setError(String(e)));
+  useEffect(() => { void load(); }, [propertyId]);
+
+  const handleAdd = async () => {
+    if (!name.trim() || !phone.trim()) return;
+    setSaving(true); setError('');
+    try { await api.hosts.add(propertyId, name.trim(), phone.trim()); setName(''); setPhone(''); void load(); }
+    catch (e) { setError(String(e)); }
+    finally { setSaving(false); }
+  };
+
+  const handleRemove = async (hostId: string) => {
+    if (!confirm('Remove this host?')) return;
+    try { await api.hosts.remove(propertyId, hostId); void load(); }
+    catch (e) { setError(String(e)); }
+  };
+
+  return (
+    <div className="space-y-4">
+      {error && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-700">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+          {error}
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <p className="text-sm font-semibold text-slate-700 mb-1">Add host</p>
+        <p className="text-xs text-slate-400 mb-3">When AI can't answer, all hosts are notified. First to reply JOIN takes over.</p>
+        <div className="flex gap-3 items-end">
+          <div className="w-40">
+            <label className="block text-xs text-slate-400 font-medium mb-1.5">Name</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent transition-shadow"
+              placeholder="Maria"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs text-slate-400 font-medium mb-1.5">WhatsApp number</label>
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleAdd(); }}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent transition-shadow"
+              placeholder="+919876543210"
+            />
+          </div>
+          <button
+            onClick={handleAdd}
+            disabled={saving || !name || !phone}
+            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {saving ? 'Adding…' : 'Add'}
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        {hosts.length === 0 ? (
+          <div className="py-12 text-center">
+            <svg className="w-8 h-8 text-slate-200 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            <p className="text-sm text-slate-400">No hosts yet</p>
+            <p className="text-xs text-slate-400 mt-1">Add a host to enable AI handoffs via WhatsApp</p>
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="border-b border-slate-100">
+              <tr className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                <th className="px-5 py-3.5 text-left">Name</th>
+                <th className="px-5 py-3.5 text-left">WhatsApp</th>
+                <th className="px-5 py-3.5 w-12" />
+              </tr>
+            </thead>
+            <tbody>
+              {hosts.map((h, i) => (
+                <tr key={h.id} className={`${i > 0 ? 'border-t border-slate-50' : ''} hover:bg-slate-50 transition-colors`}>
+                  <td className="px-5 py-3 font-medium text-slate-800">{h.name}</td>
+                  <td className="px-5 py-3 text-slate-500 text-xs font-mono">{h.phone.replace('whatsapp:', '')}</td>
+                  <td className="px-5 py-3">
+                    <button
+                      onClick={() => handleRemove(h.id)}
+                      className="text-slate-300 hover:text-red-500 transition-colors"
+                      title="Remove host"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
@@ -680,7 +795,7 @@ function Toggle({
   );
 }
 
-function SettingsPanel({ property, onSave }: { property: Property; onSave: (updated: Property) => void }) {
+function SettingsPanel({ property, hasHosts, onSave }: { property: Property; hasHosts: boolean; onSave: (updated: Property) => void }) {
   const stored = property.config?.features ?? {};
   const [features, setFeatures] = useState<PropertyFeatures>({ ...DEFAULT_PROPERTY_FEATURES, ...stored });
   const [saving, setSaving] = useState(false);
@@ -701,8 +816,6 @@ function SettingsPanel({ property, onSave }: { property: Property; onSave: (upda
     finally { setSaving(false); }
   };
 
-  const hasHostPhone = !!property.hostPhone;
-
   return (
     <div className="space-y-4 max-w-xl">
       {error && (
@@ -720,15 +833,15 @@ function SettingsPanel({ property, onSave }: { property: Property; onSave: (upda
             <Toggle
               label="Host relay"
               description={
-                hasHostPhone
-                  ? "When AI can't answer, ping the host for availability then relay messages between host and guest."
-                  : "Requires a host phone number set on this property."
+                hasHosts
+                  ? "When AI can't answer, ping all hosts for availability then relay messages between host and guest."
+                  : "Requires at least one host added in the Hosts tab."
               }
               checked={features.hostRelay}
               onChange={(v) => set('hostRelay', v)}
-              disabled={!hasHostPhone}
+              disabled={!hasHosts}
             />
-            {features.hostRelay && hasHostPhone && (
+            {features.hostRelay && hasHosts && (
               <div className="pb-3.5 pl-1">
                 <label className="block text-xs text-slate-500 font-medium mb-1.5">
                   Host response timeout (minutes)
@@ -741,7 +854,7 @@ function SettingsPanel({ property, onSave }: { property: Property; onSave: (upda
                   onChange={(e) => set('hostAvailabilityTimeoutMin', Number(e.target.value))}
                   className="w-24 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent"
                 />
-                <p className="text-xs text-slate-400 mt-1">If host doesn't respond within this window, the guest is notified to wait.</p>
+                <p className="text-xs text-slate-400 mt-1">If no host responds within this window, the guest is told the host is unavailable and AI takes back over.</p>
               </div>
             )}
           </div>
@@ -828,10 +941,10 @@ function SettingsPanel({ property, onSave }: { property: Property; onSave: (upda
         )}
       </div>
 
-      {!hasHostPhone && (
+      {!hasHosts && (
         <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-sm text-amber-800">
           <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
-          No host phone set. Add one in the Info tab to enable host relay.
+          No hosts configured. Add hosts in the Hosts tab to enable host relay.
         </div>
       )}
     </div>
@@ -886,7 +999,6 @@ function PropertyForm({
         {field('Type', 'type', 'airbnb / hotel / villa')}
         {field('Address', 'address', '123 Ocean Drive...')}
         {field('Contact phone', 'phone', '+1 305 555 0100')}
-        {field('Host WhatsApp number', 'hostPhone', '+919876543210')}
         {field('WhatsApp number (Twilio)', 'phoneNumber', 'whatsapp:+14155238886')}
         {field('Channel Manager listing ID', 'externalId', '12345678')}
         {field('Check-in time', 'checkInTime', '3:00 PM')}
