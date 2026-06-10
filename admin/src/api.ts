@@ -46,10 +46,14 @@ export const DEFAULT_PROPERTY_FEATURES: PropertyFeatures = {
 
 export type Property = {
   id: string; name: string; type?: string; description?: string;
-  address?: string; phone?: string; hostPhone?: string; phoneNumber?: string; externalId?: string;
+  address?: string; phone?: string; phoneNumber?: string; externalId?: string;
   checkInTime?: string; checkOutTime?: string; amenities: string[]; policies: string[];
   config?: { features?: Partial<PropertyFeatures> };
   createdAt: string;
+};
+
+export type PropertyHost = {
+  id: string; propertyId: string; name: string; phone: string; createdAt: string;
 };
 
 export type Knowledge = { id: string; propertyId: string; key: string; value: string; updatedAt: string };
@@ -67,6 +71,7 @@ export type ConversationStatus = 'ai' | 'awaiting_host' | 'host' | 'pending';
 export type Conversation = {
   id: string; userPhone: string; channel: string; createdAt: string;
   status: ConversationStatus; guestName?: string | null;
+  activeHostPhone?: string | null; activeHostName?: string | null;
   property?: Property; messages: Message[];
 };
 
@@ -144,6 +149,16 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ config: { features } }),
       }),
+  },
+
+  hosts: {
+    list: (propertyId: string) => request<PropertyHost[]>(`/admin/properties/${propertyId}/hosts`),
+    add: (propertyId: string, name: string, phone: string) =>
+      request<PropertyHost>(`/admin/properties/${propertyId}/hosts`, {
+        method: 'POST', body: JSON.stringify({ name, phone }),
+      }),
+    remove: (propertyId: string, hostId: string) =>
+      request<void>(`/admin/properties/${propertyId}/hosts/${hostId}`, { method: 'DELETE' }),
   },
 
   knowledge: {

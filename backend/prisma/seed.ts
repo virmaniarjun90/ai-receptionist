@@ -21,7 +21,6 @@ async function main(): Promise<void> {
   const property = await prisma.property.upsert({
     where: { id: DEFAULT_PROPERTY_ID },
     update: {
-      hostPhone: process.env.HOST_WHATSAPP_NUMBER ?? 'whatsapp:+15550000001',
       phoneNumber: process.env.TWILIO_WHATSAPP_NUMBER ?? null,
     },
     create: {
@@ -35,7 +34,6 @@ async function main(): Promise<void> {
       // Set this to match TWILIO_WHATSAPP_NUMBER for single-property setups.
       // Each property in a multi-property deployment has its own WhatsApp number.
       phoneNumber: process.env.TWILIO_WHATSAPP_NUMBER ?? null,
-      hostPhone: process.env.HOST_WHATSAPP_NUMBER ?? 'whatsapp:+15550000001',
       checkInTime: '3:00 PM',
       checkOutTime: '11:00 AM',
       amenities: [
@@ -57,6 +55,21 @@ async function main(): Promise<void> {
       ],
     },
   });
+
+  // Sunset Villa hosts — hardcoded for demo/dev seeding.
+  const demoHosts = [
+    { name: 'Sunita',  phone: 'whatsapp:+919089786756' },
+    { name: 'Manju',   phone: 'whatsapp:+919234545345' },
+    { name: 'Morisha', phone: 'whatsapp:+919755634536' },
+  ];
+
+  for (const host of demoHosts) {
+    await prisma.propertyHost.upsert({
+      where: { propertyId_phone: { propertyId: property.id, phone: host.phone } },
+      update: { name: host.name },
+      create: { propertyId: property.id, name: host.name, phone: host.phone },
+    });
+  }
 
   const knowledgeEntries = [
     { key: 'wifi_name', value: 'SunsetVilla_5G' },
@@ -85,8 +98,8 @@ async function main(): Promise<void> {
     update: {
       guestName: 'Arjun Virmani',
       guestPhone: 'whatsapp:+918802078873',
-      checkIn: new Date('2026-05-07T15:00:00Z'),
-      checkOut: new Date('2026-05-12T11:00:00Z'),
+      checkIn: new Date('2026-06-10T15:00:00Z'),
+      checkOut: new Date('2026-05-14T11:00:00Z'),
       status: 'confirmed',
     },
     create: {
@@ -94,8 +107,8 @@ async function main(): Promise<void> {
       externalId: 'DEMO-ARJUN-001',
       guestName: 'Arjun Virmani',
       guestPhone: 'whatsapp:+918802078873',
-      checkIn: new Date('2026-05-07T15:00:00Z'),
-      checkOut: new Date('2026-05-12T11:00:00Z'),
+      checkIn: new Date('2026-06-10T15:00:00Z'),
+      checkOut: new Date('2026-06-14T11:00:00Z'),
       status: 'confirmed',
       guestCount: 1,
       notes: 'Registered via pilot form.',
@@ -108,8 +121,8 @@ async function main(): Promise<void> {
     update: {
       guestName: 'Kunal',
       guestPhone: 'whatsapp:+918570846127',
-      checkIn: new Date('2026-05-07T15:00:00Z'),
-      checkOut: new Date('2026-05-12T11:00:00Z'),
+      checkIn: new Date('2026-06-10T15:00:00Z'),
+      checkOut: new Date('2026-06-14T11:00:00Z'),
       status: 'confirmed',
     },
     create: {
@@ -117,8 +130,8 @@ async function main(): Promise<void> {
       externalId: 'DEMO-KUNAL-001',
       guestName: 'Kunal',
       guestPhone: 'whatsapp:+918570846127',
-      checkIn: new Date('2026-05-07T15:00:00Z'),
-      checkOut: new Date('2026-05-12T11:00:00Z'),
+      checkIn: new Date('2026-06-10T15:00:00Z'),
+      checkOut: new Date('2026-06-14T11:00:00Z'),
       status: 'confirmed',
       guestCount: 2,
       notes: 'Registered via pilot form.',
@@ -127,7 +140,8 @@ async function main(): Promise<void> {
 
   console.log(
     `Seeded: tenant "${tenant.name}", property "${property.name}", ` +
-    `${knowledgeEntries.length} knowledge entries, 2 demo reservations (Arjun + Kunal).`,
+    `${knowledgeEntries.length} knowledge entries, 2 demo reservations (Arjun + Kunal), ` +
+    `${demoHosts.length} host(s) (${demoHosts.map((h) => h.name).join(', ')}).`,
   );
 }
 

@@ -1,6 +1,6 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
-import { Conversation, Property } from '@prisma/client';
+import { Conversation, Property, PropertyHost } from '@prisma/client';
 import { Job } from 'bullmq';
 import { AiService } from '../ai/ai.service';
 import { CommunicationService } from '../communication/communication.service';
@@ -13,6 +13,7 @@ import { HostForwardJobPayload, HostTimeoutJobPayload, ProcessMessageJobPayload,
 const HANDOFF_PREFIX = '[HANDOFF]';
 const AI_COST_PER_CALL_USD = 0.004; // approximate per Claude Sonnet call
 
+// Commands host can send via WhatsApp (case-insensitive)
 const CMD_JOIN = new Set(['join', 'yes', 'takeover', 'take over']);
 const CMD_DONE = new Set(['done', '/done', '/ai', 'bye', 'back', 'handback']);
 const CMD_SKIP = new Set(['skip', 'no', 'pass']);
@@ -64,46 +65,80 @@ export class QueueProcessor extends WorkerHost {
     const { userPhone, propertyPhone, message } = job.data;
 
     const property = await this.propertyService.getPropertyByPhone(propertyPhone);
+    const hosts = property
+      ? await this.propertyService.getHostsForProperty(property.id)
+      : [];
 
-    if (property?.hostPhone && userPhone === property.hostPhone) {
+    const isHost = hosts.some((h) => h.phone === userPhone);
+
+    if (isHost && property) {
       const activeConv = await this.conversationService.getActiveHostConversation(property.id);
-      await this.processHostCommand(message, property, propertyPhone, activeConv);
+      await this.processHostCommand(message, property, propertyPhone, activeConv, userPhone, hosts);
       return;
     }
 
-    await this.processGuestMessage(userPhone, propertyPhone, message, property);
+    await this.processGuestMessage(userPhone, propertyPhone, message, property, hosts);
   }
 
-  // ─── Host command handler ─────────────────────────────────────────────────
+  // ─── Host command handler (via WhatsApp) ─────────────────────────────────
 
   private async processHostCommand(
     message: string,
     property: Property,
     propertyPhone: string,
     conversation: Conversation | null,
+    senderPhone: string,
+    hosts: PropertyHost[],
   ): Promise<void> {
     const cmd = message.trim().toLowerCase();
 
     if (!conversation) {
-      await this.send(property.hostPhone!, propertyPhone,
-        `No active guest conversation to manage. Your guests will appear here when they need help.`);
+      await this.send(senderPhone, propertyPhone,
+        `No active guest conversation right now. The guest may have already been helped by the AI, or the request timed out. Check the admin dashboard to review recent conversations.`);
       return;
     }
 
     if (CMD_JOIN.has(cmd)) {
+      // Another host already claimed this conversation
+      if (conversation.activeHostPhone) {
+        const activeHost = hosts.find((h) => h.phone === conversation.activeHostPhone);
+        await this.send(senderPhone, propertyPhone,
+          `${activeHost?.name ?? 'Another host'} has already joined this conversation. No action needed from you.`);
+        return;
+      }
+
       await this.conversationService.setStatus(conversation.id, 'host');
-      await this.send(property.hostPhone!, propertyPhone,
+      await this.conversationService.setActiveHost(conversation.id, senderPhone);
+
+      const joiningHost = hosts.find((h) => h.phone === senderPhone);
+
+      await this.send(senderPhone, propertyPhone,
         `You're now connected with the guest. ` +
         `Reply here and your messages will be forwarded to them. ` +
         `Send DONE when finished and the AI will take back over.`);
+
+      // Notify all other hosts with the name of who joined
+      for (const host of hosts.filter((h) => h.phone !== senderPhone)) {
+        await this.send(host.phone, propertyPhone,
+          `${joiningHost?.name ?? 'Another host'} has joined this conversation. No action needed from you.`);
+      }
+
+      // Guest receives no host name — seamless experience
       await this.send(conversation.userPhone, propertyPhone,
         `You're now connected with the host. They'll reply to you shortly.`);
       return;
     }
 
     if (CMD_SKIP.has(cmd)) {
+      // Block SKIP if a different host is already handling the conversation
+      if (conversation.activeHostPhone && conversation.activeHostPhone !== senderPhone) {
+        await this.send(senderPhone, propertyPhone,
+          `Another host is currently handling this conversation.`);
+        return;
+      }
       await this.conversationService.setStatus(conversation.id, 'ai');
-      await this.send(property.hostPhone!, propertyPhone,
+      await this.conversationService.setActiveHost(conversation.id, null);
+      await this.send(senderPhone, propertyPhone,
         `Got it — the AI assistant will continue handling this conversation.`);
       await this.send(conversation.userPhone, propertyPhone,
         `I wasn't able to reach the host right now, but I'll do my best to help. What else can I assist with?`);
@@ -111,24 +146,37 @@ export class QueueProcessor extends WorkerHost {
     }
 
     if (CMD_DONE.has(cmd)) {
+      // Only the active host can hand back to AI
+      if (conversation.activeHostPhone && conversation.activeHostPhone !== senderPhone) {
+        await this.send(senderPhone, propertyPhone,
+          `You're not currently handling this conversation.`);
+        return;
+      }
       await this.conversationService.setStatus(conversation.id, 'ai');
-      await this.send(property.hostPhone!, propertyPhone,
+      await this.conversationService.setActiveHost(conversation.id, null);
+      await this.send(senderPhone, propertyPhone,
         `Conversation handed back to the AI assistant. Thanks for helping!`);
       await this.send(conversation.userPhone, propertyPhone,
         `The host has stepped away. You're back with the AI assistant — how can I help?`);
       return;
     }
 
-    // Any other message while active → forward to guest
+    // Any other text while host is active → forward to guest (active host only)
     if (conversation.status === 'host' || conversation.status === 'pending') {
+      if (conversation.activeHostPhone && conversation.activeHostPhone !== senderPhone) {
+        await this.send(senderPhone, propertyPhone,
+          `Another host is currently handling this conversation.`);
+        return;
+      }
       await this.conversationService.addMessage(conversation.id, message, 'assistant');
       await this.conversationService.setStatus(conversation.id, 'host');
       await this.send(conversation.userPhone, propertyPhone, message);
       return;
     }
 
+    // Unrecognised command while waiting for a host to join
     if (conversation.status === 'awaiting_host') {
-      await this.send(property.hostPhone!, propertyPhone,
+      await this.send(senderPhone, propertyPhone,
         `Reply JOIN to assist the guest, SKIP to let the AI handle it, or DONE when you're finished.`);
     }
   }
@@ -153,6 +201,7 @@ export class QueueProcessor extends WorkerHost {
     propertyPhone: string,
     message: string,
     property: Property | null,
+    hosts: PropertyHost[],
   ): Promise<void> {
     const propertyId = property?.id ?? null;
     const features = property ? getPropertyFeatures(property) : null;
@@ -164,14 +213,22 @@ export class QueueProcessor extends WorkerHost {
 
     await this.conversationService.addMessage(conversation.id, message, 'user');
 
-    // Host has taken over — forward new guest message to host, skip AI
-    if (conversation.status === 'host' || conversation.status === 'pending' || conversation.status === 'awaiting_host') {
-      await this.conversationService.setStatus(conversation.id,
-        conversation.status === 'host' ? 'pending' : conversation.status);
+    // Host has taken over — forward to the active host, skip AI
+    if (conversation.status === 'host' || conversation.status === 'pending') {
+      await this.conversationService.setStatus(conversation.id, 'pending');
+      const notifyPhone = conversation.activeHostPhone;
+      if (notifyPhone) {
+        await this.send(notifyPhone, propertyPhone,
+          `[${property?.name ?? 'Property'}] Guest sent: "${message}"\n\nReply to respond, or send DONE to hand back to AI.`);
+      }
+      return;
+    }
 
-      if (property?.hostPhone) {
-        await this.send(property.hostPhone, propertyPhone,
-          `[${property.name}] Guest sent: "${message}"\n\nReply to respond, or send DONE to hand back to AI.`);
+    // Handoff already triggered — nudge all hosts again with the new message
+    if (conversation.status === 'awaiting_host') {
+      for (const host of hosts) {
+        await this.send(host.phone, propertyPhone,
+          `[${property?.name ?? 'Property'}] Guest sent another message: "${message}"`);
       }
       return;
     }
@@ -186,7 +243,7 @@ export class QueueProcessor extends WorkerHost {
       const estimatedCost = aiCallCount * AI_COST_PER_CALL_USD;
 
       if (estimatedCost >= features.budgetLimitUsd) {
-        const hasRelay = features.hostRelay && !!property?.hostPhone;
+        const hasRelay = features.hostRelay && hosts.length > 0;
         const budgetMsg = hasRelay
           ? `I've reached my limit for this conversation. Let me connect you with the host.`
           : `I've reached my limit for this conversation. Please reach out to the host directly for further help.`;
@@ -194,16 +251,19 @@ export class QueueProcessor extends WorkerHost {
         await this.conversationService.addMessage(conversation.id, budgetMsg, 'assistant');
         await this.send(userPhone, propertyPhone, budgetMsg);
 
-        if (hasRelay) {
-          await this.triggerHostRelay(conversation.id, property!, propertyPhone, userPhone,
-            reservation?.guestName ?? userPhone, message, features.hostAvailabilityTimeoutMin,
-            `AI budget reached for ${reservation?.guestName ?? 'guest'}. They may need direct assistance.`);
+        if (hasRelay && property) {
+          await this.triggerHostRelay(
+            conversation.id, property, propertyPhone, userPhone,
+            reservation?.guestName ?? userPhone, message,
+            features.hostAvailabilityTimeoutMin, hosts,
+            `AI budget reached for ${reservation?.guestName ?? 'guest'}. They may need direct assistance.`,
+          );
         }
         return;
       }
     }
 
-    // AI handles it
+    // AI handles the message
     const recentMessages = await this.conversationService.getRecentMessages(conversation.id, 10);
 
     const rawReply = await this.aiService.generateReply(
@@ -219,11 +279,14 @@ export class QueueProcessor extends WorkerHost {
       await this.conversationService.addMessage(conversation.id, visibleMsg, 'assistant');
       await this.send(userPhone, propertyPhone, visibleMsg);
 
-      const hasRelay = features?.hostRelay && !!property?.hostPhone;
-      if (hasRelay) {
-        await this.triggerHostRelay(conversation.id, property!, propertyPhone, userPhone,
-          reservation?.guestName ?? userPhone, message, features!.hostAvailabilityTimeoutMin,
-          `${reservation?.guestName ?? 'A guest'} asked something the AI can't answer:\n"${message}"\n\nReply JOIN to assist directly, or SKIP to let the AI try again.`);
+      const hasRelay = features?.hostRelay && hosts.length > 0;
+      if (hasRelay && property) {
+        await this.triggerHostRelay(
+          conversation.id, property, propertyPhone, userPhone,
+          reservation?.guestName ?? userPhone, message,
+          features!.hostAvailabilityTimeoutMin, hosts,
+          `${reservation?.guestName ?? 'A guest'} asked something the AI can't answer:\n"${message}"\n\nReply JOIN to assist directly, or SKIP to let the AI try again.`,
+        );
       }
       return;
     }
@@ -232,7 +295,7 @@ export class QueueProcessor extends WorkerHost {
     await this.send(userPhone, propertyPhone, rawReply);
   }
 
-  // ─── Shared relay trigger ─────────────────────────────────────────────────
+  // ─── Shared relay trigger — notifies ALL hosts ────────────────────────────
 
   private async triggerHostRelay(
     conversationId: string,
@@ -242,26 +305,36 @@ export class QueueProcessor extends WorkerHost {
     guestLabel: string,
     _guestMessage: string,
     timeoutMinutes: number,
+    hosts: PropertyHost[],
     hostNotification: string,
   ): Promise<void> {
     await this.conversationService.setStatus(conversationId, 'awaiting_host');
-    await this.send(property.hostPhone!, propertyPhone,
-      `[${property.name ?? 'Property'}] ${hostNotification}`);
+
+    // Send personalised notification to every host — first to reply JOIN wins
+    for (const host of hosts) {
+      await this.send(host.phone, propertyPhone,
+        `Hi ${host.name}! [${property.name ?? 'Property'}] ${hostNotification}`);
+    }
+
     await this.queueService.addHostTimeoutJob(
       { conversationId, propertyPhone, userPhone },
       timeoutMinutes * 60 * 1000,
     );
-    this.logger.log(`Host relay triggered for conversation ${conversationId} (guest: ${guestLabel}), timeout: ${timeoutMinutes}min`);
+    this.logger.log(
+      `Host relay triggered for conversation ${conversationId} (guest: ${guestLabel}), ` +
+      `hosts: ${hosts.length}, timeout: ${timeoutMinutes}min`,
+    );
   }
 
-  // ─── Legacy job type from admin takeover ─────────────────────────────────
+  // ─── Admin-initiated host forward ─────────────────────────────────────────
 
   private async processHostMessage(job: Job<HostForwardJobPayload>): Promise<void> {
     const { hostPhone, propertyPhone, message } = job.data;
     const property = await this.propertyService.getPropertyByPhone(propertyPhone);
     if (!property) return;
+    const hosts = await this.propertyService.getHostsForProperty(property.id);
     const conversation = await this.conversationService.getActiveHostConversation(property.id);
-    await this.processHostCommand(message, { ...property, hostPhone }, propertyPhone, conversation);
+    await this.processHostCommand(message, property, propertyPhone, conversation, hostPhone, hosts);
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────

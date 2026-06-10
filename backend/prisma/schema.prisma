@@ -22,7 +22,6 @@ model Property {
   description   String?
   address       String?
   phone         String?
-  hostPhone     String?
   checkInTime   String?
   checkOutTime  String?
   amenities     String[]       @default([])
@@ -36,6 +35,7 @@ model Property {
   phoneNumber   String?        @unique
   conversations Conversation[]
   guestTokens   GuestToken[]
+  hosts         PropertyHost[]
   knowledge     Knowledge[]
   tenant        Tenant?        @relation(fields: [tenantId], references: [id])
   reservations  Reservation[]
@@ -44,16 +44,30 @@ model Property {
   @@index([phoneNumber])
 }
 
+model PropertyHost {
+  id         String   @id @default(uuid()) @db.Uuid
+  propertyId String   @db.Uuid
+  name       String
+  phone      String
+  createdAt  DateTime @default(now())
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, phone])
+  @@index([propertyId])
+  @@index([phone])
+}
+
 model Conversation {
-  id         String             @id @default(uuid()) @db.Uuid
-  userPhone  String
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
-  propertyId String?            @db.Uuid
-  channel    Channel            @default(whatsapp)
-  status     ConversationStatus @default(ai)
-  property   Property?          @relation(fields: [propertyId], references: [id])
-  messages   Message[]
+  id              String             @id @default(uuid()) @db.Uuid
+  userPhone       String
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  propertyId      String?            @db.Uuid
+  channel         Channel            @default(whatsapp)
+  status          ConversationStatus @default(ai)
+  activeHostPhone String?
+  property        Property?          @relation(fields: [propertyId], references: [id])
+  messages        Message[]
 
   @@index([propertyId, userPhone, channel])
   @@index([propertyId, createdAt])
