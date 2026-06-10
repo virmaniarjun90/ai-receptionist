@@ -4,13 +4,16 @@ import {
   Delete,
   Get,
   HttpCode,
+  Inject,
   Param,
   Patch,
   Post,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Knowledge, Message, Property, Reservation } from '@prisma/client';
+import { APP_CONFIG, AppConfig } from '../../config/app.config';
 import { SyncService, SyncResult } from '../channel-manager/sync.service';
 import { SyncScheduler } from '../channel-manager/sync.scheduler';
 import { CommunicationService } from '../communication/communication.service';
@@ -19,6 +22,16 @@ import { KnowledgeService } from '../knowledge/knowledge.service';
 import { PropertyService, CreatePropertyInput, UpdatePropertyInput } from '../property/property.service';
 import { ReservationService, CreateReservationInput, UpdateReservationInput } from '../reservation/reservation.service';
 import { AdminGuard } from './admin.guard';
+import { SettingsService } from './settings.service';
+
+function maskSecret(value: string): string {
+  if (value.length <= 8) return '••••••••';
+  return value.slice(0, 4) + '••••••••' + value.slice(-4);
+}
+
+function maskDatabaseUrl(url: string): string {
+  return url.replace(/(:\/\/[^:]+:)([^@]+)(@)/, '$1••••••••$3');
+}
 
 @ApiTags('Admin')
 @ApiHeader({ name: 'x-admin-key', description: 'Admin API key (required when ADMIN_API_KEY is set)', required: false })
@@ -33,7 +46,93 @@ export class AdminController {
     private readonly communicationService: CommunicationService,
     private readonly syncService: SyncService,
     private readonly syncScheduler: SyncScheduler,
+    private readonly settingsService: SettingsService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
+
+  // ─── System Config ───────────────────────────────────────────────────────────
+
+  @Get('config')
+  @ApiOperation({ summary: 'Current system configuration (secrets masked)' })
+  getConfig() {
+    const llm = this.config.llm;
+    const activeModel =
+      llm.provider === 'claude' ? llm.claudeModel
+      : llm.provider === 'openai' ? llm.openaiModel
+      : llm.provider === 'kimi' ? llm.kimiModel
+      : 'n/a';
+    const activeKey =
+      llm.provider === 'claude' ? llm.anthropicApiKey
+      : llm.provider === 'openai' ? llm.openaiApiKey
+      : llm.provider === 'kimi' ? llm.kimiApiKey
+      : null;
+
+    return {
+      appMode: this.config.appMode,
+      appUrl: this.config.appUrl,
+      piiMasking: this.config.piiMaskingEnabled,
+      admin: {
+        apiKeySet: !!this.config.admin.apiKey,
+      },
+      llm: {
+        provider: llm.provider,
+        model: activeModel,
+        apiKey: activeKey ? maskSecret(activeKey) : null,
+        apiKeySet: !!activeKey,
+        claudeModel: llm.claudeModel,
+        openaiModel: llm.openaiModel,
+        kimiModel: llm.kimiModel,
+      },
+      twilio: {
+        accountSid: this.config.twilio.accountSid ? maskSecret(this.config.twilio.accountSid) : null,
+        authTokenSet: !!this.config.twilio.authToken,
+        whatsappNumber: this.config.twilio.whatsappNumber ?? null,
+        webhookValidation: this.config.twilio.validateWebhook,
+      },
+      channelManager: {
+        provider: this.config.channelManager.provider,
+        configured: !!(
+          this.config.channelManager.airbnbAccessToken ||
+          this.config.channelManager.airbnbClientId ||
+          this.config.channelManager.cm1ApiKey
+        ),
+        cm1ChannelId: this.config.channelManager.cm1ChannelId ?? null,
+        cm1ApiKeySet: !!this.config.channelManager.cm1ApiKey,
+      },
+      database: {
+        url: this.config.database.url ? maskDatabaseUrl(this.config.database.url) : null,
+        urlSet: !!this.config.database.url,
+      },
+      redis: {
+        host: this.config.redis.host,
+        port: this.config.redis.port,
+        passwordSet: !!this.config.redis.password,
+        tls: this.config.redis.tls,
+      },
+    };
+  }
+
+  @Patch('config')
+  @ApiOperation({ summary: 'Update system configuration (requires confirmation key)' })
+  async updateConfig(
+    @Body() body: { confirmKey: string; updates: Record<string, string> },
+  ) {
+    if (!this.config.admin.apiKey) {
+      throw new UnauthorizedException(
+        'No ADMIN_API_KEY is set — set one in backend/.env before using config edit',
+      );
+    }
+    if (body.confirmKey !== this.config.admin.apiKey) {
+      throw new UnauthorizedException('Invalid confirmation key');
+    }
+    const filtered: Record<string, string> = {};
+    for (const [k, v] of Object.entries(body.updates)) {
+      if (v !== undefined && v !== null) filtered[k] = v;
+    }
+    await this.settingsService.setMany(filtered);
+    this.settingsService.applyToConfig(filtered);
+    return { saved: true };
+  }
 
   // ─── Properties ─────────────────────────────────────────────────────────────
 

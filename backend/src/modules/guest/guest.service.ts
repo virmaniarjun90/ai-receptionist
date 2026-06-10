@@ -4,7 +4,7 @@ import { APP_CONFIG, AppConfig } from '../../config/app.config';
 import { PrismaService } from '../common/prisma.service';
 import { CommunicationService } from '../communication/communication.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
-import { PropertyService } from '../property/property.service';
+import { PropertyService, getPropertyFeatures } from '../property/property.service';
 import { ReservationService } from '../reservation/reservation.service';
 
 export type RegisterGuestInput = {
@@ -36,8 +36,9 @@ export class GuestService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  async register(input: RegisterGuestInput): Promise<{ reservation: Reservation; welcomeUrl: string }> {
+  async register(input: RegisterGuestInput): Promise<{ reservation: Reservation; welcomeUrl: string | null }> {
     const property = await this.propertyService.getById(input.propertyId);
+    const features = getPropertyFeatures(property);
 
     const reservation = await this.reservationService.create({
       propertyId: input.propertyId,
@@ -48,21 +49,22 @@ export class GuestService {
       guestCount: input.guestCount ?? 1,
     });
 
-    const token = await this.prisma.guestToken.create({
-      data: {
-        reservationId: reservation.id,
-        propertyId: input.propertyId,
-        expiresAt: input.checkOut,
-      },
-    });
+    let welcomeUrl: string | null = null;
 
-    const welcomeUrl = `${this.config.appUrl}/guest/welcome/${token.token}`;
+    if (features.guestGuide) {
+      const token = await this.prisma.guestToken.create({
+        data: {
+          reservationId: reservation.id,
+          propertyId: input.propertyId,
+          expiresAt: input.checkOut,
+        },
+      });
+      welcomeUrl = `${this.config.appUrl}/guest/welcome/${token.token}`;
+    }
 
     try {
       await this.sendWelcomeMessage(property, reservation, welcomeUrl, input.guestPhone);
     } catch (err) {
-      // Don't block registration if WhatsApp delivery fails (e.g. sandbox opt-in not done).
-      // Guest can still use the welcomeUrl directly.
       this.logger.warn(`Welcome message failed for ${input.guestPhone}: ${err instanceof Error ? err.message : String(err)}`);
     }
 
@@ -97,17 +99,21 @@ export class GuestService {
   private async sendWelcomeMessage(
     property: Property,
     reservation: Reservation,
-    welcomeUrl: string,
+    welcomeUrl: string | null,
     guestPhone: string,
   ): Promise<void> {
     const firstName = reservation.guestName.split(' ')[0];
     const checkIn = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(reservation.checkIn));
     const checkOut = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' }).format(new Date(reservation.checkOut));
 
+    const guideSection = welcomeUrl
+      ? `Here's your digital welcome guide:\n${welcomeUrl}\n\n`
+      : '';
+
     const body =
-      `Hi ${firstName}! Welcome to ${property.name} 🏡\n\n` +
+      `Hi ${firstName}! Welcome to ${property.name}.\n\n` +
       `Your stay: ${checkIn} → ${checkOut}\n\n` +
-      `Here's your digital welcome guide:\n${welcomeUrl}\n\n` +
+      guideSection +
       `Feel free to WhatsApp me anytime with questions — I'm your 24/7 AI assistant. ` +
       `Need the host directly? Just ask and I'll connect you.`;
 

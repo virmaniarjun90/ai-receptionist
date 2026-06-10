@@ -11,7 +11,7 @@ export class OpenAiProvider implements LlmProvider {
   private readonly model: string;
 
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
-    this.client = new OpenAI({ apiKey: config.llm.openaiApiKey });
+    this.client = new OpenAI({ apiKey: config.llm.openaiApiKey ?? 'placeholder' });
     this.model = config.llm.openaiModel;
   }
 

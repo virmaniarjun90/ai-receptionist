@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, Knowledge, Property, Reservation, SyncResult } from '../api';
+import { api, DEFAULT_PROPERTY_FEATURES, Knowledge, Property, PropertyFeatures, Reservation, SyncResult } from '../api';
 
 // ─── Property Card ─────────────────────────────────────────────────────────
 
@@ -140,7 +140,7 @@ export function Properties() {
 // ─── Property Detail ────────────────────────────────────────────────────────
 
 function PropertyDetail({ property, onBack }: { property: Property; onBack: () => void }) {
-  const [tab, setTab] = useState<'info' | 'knowledge' | 'reservations'>('info');
+  const [tab, setTab] = useState<'info' | 'knowledge' | 'reservations' | 'settings'>('info');
   const [editing, setEditing] = useState(false);
   const [current, setCurrent] = useState(property);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
@@ -164,6 +164,7 @@ function PropertyDetail({ property, onBack }: { property: Property; onBack: () =
     { id: 'info' as const, label: 'Info' },
     { id: 'knowledge' as const, label: 'Knowledge / FAQs' },
     { id: 'reservations' as const, label: 'Reservations' },
+    { id: 'settings' as const, label: 'Settings' },
   ];
 
   return (
@@ -234,6 +235,12 @@ function PropertyDetail({ property, onBack }: { property: Property; onBack: () =
       )}
       {tab === 'knowledge' && <KnowledgePanel propertyId={current.id} />}
       {tab === 'reservations' && <ReservationsPanel propertyId={current.id} />}
+      {tab === 'settings' && (
+        <SettingsPanel
+          property={current}
+          onSave={(updated) => setCurrent(updated)}
+        />
+      )}
     </div>
   );
 }
@@ -265,6 +272,7 @@ function PropertyInfo({ property: p, onEdit }: { property: Property; onEdit: () 
         {row('Type', p.type)}
         {row('Address', p.address)}
         {row('Contact Phone', p.phone)}
+        {row('Host WhatsApp', p.hostPhone)}
         {row('WhatsApp Number', p.phoneNumber)}
         {row('Channel Manager ID', p.externalId)}
         {row('Check-in', p.checkInTime)}
@@ -545,10 +553,10 @@ function ReservationForm({
     if (form.checkOut <= form.checkIn) { setError('Check-out must be after check-in.'); return; }
     setSaving(true); setError('');
     try {
-      const phone = form.guestPhone.trim();
+      const rawPhone = form.guestPhone.trim().replace(/\s+/g, '');
       await onSave({
         guestName: form.guestName.trim(),
-        guestPhone: phone ? (phone.startsWith('whatsapp:') ? phone : `whatsapp:${phone}`) : undefined,
+        guestPhone: rawPhone ? (rawPhone.startsWith('whatsapp:') ? rawPhone : `whatsapp:${rawPhone}`) : undefined,
         checkIn: form.checkIn,
         checkOut: form.checkOut,
         guestCount: parseInt(form.guestCount, 10) || 1,
@@ -577,7 +585,7 @@ function ReservationForm({
           <input
             value={form.guestPhone}
             onChange={(e) => set('guestPhone', e.target.value)}
-            placeholder="+919876543210"
+            placeholder="+918570846127"
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent transition-shadow"
           />
         </div>
@@ -643,6 +651,193 @@ function ReservationForm({
   );
 }
 
+// ─── Settings Panel ─────────────────────────────────────────────────────────
+
+function Toggle({
+  label, description, checked, onChange, disabled,
+}: {
+  label: string; description?: string; checked: boolean;
+  onChange: (v: boolean) => void; disabled?: boolean;
+}) {
+  return (
+    <div className={`flex items-start justify-between py-3.5 ${disabled ? 'opacity-40' : ''}`}>
+      <div className="flex-1 pr-6">
+        <p className="text-sm font-medium text-slate-800">{label}</p>
+        {description && <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{description}</p>}
+      </div>
+      <button
+        type="button"
+        onClick={() => !disabled && onChange(!checked)}
+        className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+          checked ? 'bg-indigo-600' : 'bg-slate-200'
+        } ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+        role="switch"
+        aria-checked={checked}
+      >
+        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${checked ? 'translate-x-4' : 'translate-x-0'}`} />
+      </button>
+    </div>
+  );
+}
+
+function SettingsPanel({ property, onSave }: { property: Property; onSave: (updated: Property) => void }) {
+  const stored = property.config?.features ?? {};
+  const [features, setFeatures] = useState<PropertyFeatures>({ ...DEFAULT_PROPERTY_FEATURES, ...stored });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+
+  const set = <K extends keyof PropertyFeatures>(key: K, value: PropertyFeatures[K]) =>
+    setFeatures((f) => ({ ...f, [key]: value }));
+
+  const handleSave = async () => {
+    setSaving(true); setError(''); setSaved(false);
+    try {
+      const updated = await api.properties.updateFeatures(property.id, features);
+      onSave(updated);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) { setError(String(e)); }
+    finally { setSaving(false); }
+  };
+
+  const hasHostPhone = !!property.hostPhone;
+
+  return (
+    <div className="space-y-4 max-w-xl">
+      {error && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-700">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+          {error}
+        </div>
+      )}
+
+      {/* AI Behaviour */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">AI Behaviour</p>
+        <div className="divide-y divide-slate-50">
+          <div>
+            <Toggle
+              label="Host relay"
+              description={
+                hasHostPhone
+                  ? "When AI can't answer, ping the host for availability then relay messages between host and guest."
+                  : "Requires a host phone number set on this property."
+              }
+              checked={features.hostRelay}
+              onChange={(v) => set('hostRelay', v)}
+              disabled={!hasHostPhone}
+            />
+            {features.hostRelay && hasHostPhone && (
+              <div className="pb-3.5 pl-1">
+                <label className="block text-xs text-slate-500 font-medium mb-1.5">
+                  Host response timeout (minutes)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={features.hostAvailabilityTimeoutMin}
+                  onChange={(e) => set('hostAvailabilityTimeoutMin', Number(e.target.value))}
+                  className="w-24 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent"
+                />
+                <p className="text-xs text-slate-400 mt-1">If host doesn't respond within this window, the guest is notified to wait.</p>
+              </div>
+            )}
+          </div>
+          <div>
+            <Toggle
+              label="Budget quota"
+              description="Cap AI spend per reservation. When the limit is hit, AI switches to knowledge-base only and pings the host."
+              checked={features.budgetQuota}
+              onChange={(v) => set('budgetQuota', v)}
+            />
+            {features.budgetQuota && (
+              <div className="pb-3.5 pl-1">
+                <label className="block text-xs text-slate-500 font-medium mb-1.5">
+                  AI spend limit per reservation (USD)
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-400">$</span>
+                  <input
+                    type="number"
+                    min={0.5}
+                    max={50}
+                    step={0.5}
+                    value={features.budgetLimitUsd}
+                    onChange={(e) => set('budgetLimitUsd', Number(e.target.value))}
+                    className="w-24 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Guest Features */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Guest Features</p>
+        <div className="divide-y divide-slate-50">
+          <Toggle
+            label="Guest guide"
+            description="Share a welcome link with the guest on check-in. The link expires at check-out."
+            checked={features.guestGuide}
+            onChange={(v) => set('guestGuide', v)}
+          />
+        </div>
+      </div>
+
+      {/* Add-ons */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Add-ons</p>
+          <span className="text-xs bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-full font-medium">Coming soon</span>
+        </div>
+        <div className="divide-y divide-slate-50">
+          <Toggle
+            label="Proactive messaging"
+            description="Send pre-checkin offers, evening greetings, and follow-up messages on a schedule."
+            checked={features.proactiveMessaging}
+            onChange={(v) => set('proactiveMessaging', v)}
+            disabled
+          />
+          <Toggle
+            label="Menu sharing & preference collection"
+            description="Offer meal options before check-in, collect guest preferences, and notify the host."
+            checked={features.menuSharing}
+            onChange={(v) => set('menuSharing', v)}
+            disabled
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 pt-1">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-5 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+        >
+          {saving ? 'Saving…' : 'Save settings'}
+        </button>
+        {saved && (
+          <span className="flex items-center gap-1.5 text-sm text-emerald-600 font-medium">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+            Saved
+          </span>
+        )}
+      </div>
+
+      {!hasHostPhone && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-sm text-amber-800">
+          <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+          No host phone set. Add one in the Info tab to enable host relay.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Property Form ──────────────────────────────────────────────────────────
 
 function PropertyForm({
@@ -691,6 +886,7 @@ function PropertyForm({
         {field('Type', 'type', 'airbnb / hotel / villa')}
         {field('Address', 'address', '123 Ocean Drive...')}
         {field('Contact phone', 'phone', '+1 305 555 0100')}
+        {field('Host WhatsApp number', 'hostPhone', '+919876543210')}
         {field('WhatsApp number (Twilio)', 'phoneNumber', 'whatsapp:+14155238886')}
         {field('Channel Manager listing ID', 'externalId', '12345678')}
         {field('Check-in time', 'checkInTime', '3:00 PM')}

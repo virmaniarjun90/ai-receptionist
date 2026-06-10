@@ -2,12 +2,6 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, Property } from '../api';
 
-// ─── Airbnb-style colour tokens ──────────────────────────────────────────────
-// Primary: #FF385C  (Airbnb coral)
-// Dark:    #222222
-// Mid:     #717171
-// Light:   #EBEBEB
-
 type Step = 'form' | 'success';
 
 interface FormData {

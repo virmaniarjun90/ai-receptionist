@@ -172,6 +172,20 @@ export class ConversationService {
     }
   }
 
+  async getStatus(id: string): Promise<ConversationStatus | null> {
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+    return conv?.status ?? null;
+  }
+
+  async countAiMessages(conversationId: string): Promise<number> {
+    return this.prisma.message.count({
+      where: { conversationId, role: 'assistant' },
+    });
+  }
+
   async anonymizeGuest(phone: string): Promise<{ conversations: number; messages: number }> {
     const conversations = await this.prisma.conversation.findMany({
       where: { userPhone: phone },

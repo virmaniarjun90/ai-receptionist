@@ -1,7 +1,36 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
-import { Property } from '@prisma/client';
+import { Prisma, Property } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { DEFAULT_PROPERTY_ID } from './property.constants';
+
+export type PropertyFeatures = {
+  hostRelay: boolean;
+  budgetQuota: boolean;
+  budgetLimitUsd: number;
+  hostAvailabilityTimeoutMin: number;
+  guestGuide: boolean;
+  proactiveMessaging: boolean;
+  menuSharing: boolean;
+};
+
+export const DEFAULT_PROPERTY_FEATURES: PropertyFeatures = {
+  hostRelay: true,
+  budgetQuota: true,
+  budgetLimitUsd: 2.0,
+  hostAvailabilityTimeoutMin: 5,
+  guestGuide: false,
+  proactiveMessaging: false,
+  menuSharing: false,
+};
+
+export function normalizePhone(phone: string): string {
+  return phone.trim().replace(/\s+/g, '');
+}
+
+export function getPropertyFeatures(property: Property): PropertyFeatures {
+  const stored = (property.config as Record<string, unknown> | null)?.features as Partial<PropertyFeatures> | undefined;
+  return { ...DEFAULT_PROPERTY_FEATURES, ...stored };
+}
 
 export type CreatePropertyInput = {
   name: string;
@@ -17,6 +46,7 @@ export type CreatePropertyInput = {
   checkOutTime?: string;
   amenities?: string[];
   policies?: string[];
+  config?: Record<string, unknown>;
 };
 
 export type UpdatePropertyInput = Partial<CreatePropertyInput>;
@@ -71,13 +101,14 @@ export class PropertyService {
           description: input.description ?? null,
           address: input.address ?? null,
           phone: input.phone ?? null,
-          hostPhone: input.hostPhone ?? null,
+          hostPhone: input.hostPhone ? normalizePhone(input.hostPhone) : null,
           phoneNumber: input.phoneNumber ?? null,
           externalId: input.externalId ?? null,
           checkInTime: input.checkInTime ?? null,
           checkOutTime: input.checkOutTime ?? null,
           amenities: input.amenities ?? [],
           policies: input.policies ?? [],
+          ...(input.config !== undefined && { config: input.config as unknown as Prisma.InputJsonValue }),
         },
       });
     } catch (error) {
@@ -88,24 +119,23 @@ export class PropertyService {
   async updateProperty(id: string, input: UpdatePropertyInput): Promise<Property> {
     await this.getById(id);
     try {
-      return await this.prisma.property.update({
-        where: { id },
-        data: {
-          ...(input.name !== undefined && { name: input.name }),
-          ...(input.tenantId !== undefined && { tenantId: input.tenantId }),
-          ...(input.type !== undefined && { type: input.type }),
-          ...(input.description !== undefined && { description: input.description }),
-          ...(input.address !== undefined && { address: input.address }),
-          ...(input.phone !== undefined && { phone: input.phone }),
-          ...(input.hostPhone !== undefined && { hostPhone: input.hostPhone }),
-          ...(input.phoneNumber !== undefined && { phoneNumber: input.phoneNumber }),
-          ...(input.externalId !== undefined && { externalId: input.externalId }),
-          ...(input.checkInTime !== undefined && { checkInTime: input.checkInTime }),
-          ...(input.checkOutTime !== undefined && { checkOutTime: input.checkOutTime }),
-          ...(input.amenities !== undefined && { amenities: input.amenities }),
-          ...(input.policies !== undefined && { policies: input.policies }),
-        },
-      });
+      const data: Prisma.PropertyUncheckedUpdateInput = {
+        ...(input.name !== undefined && { name: input.name }),
+        ...(input.tenantId !== undefined && { tenantId: input.tenantId }),
+        ...(input.type !== undefined && { type: input.type }),
+        ...(input.description !== undefined && { description: input.description }),
+        ...(input.address !== undefined && { address: input.address }),
+        ...(input.phone !== undefined && { phone: input.phone }),
+        ...(input.hostPhone !== undefined && { hostPhone: input.hostPhone ? normalizePhone(input.hostPhone) : null }),
+        ...(input.phoneNumber !== undefined && { phoneNumber: input.phoneNumber }),
+        ...(input.externalId !== undefined && { externalId: input.externalId }),
+        ...(input.checkInTime !== undefined && { checkInTime: input.checkInTime }),
+        ...(input.checkOutTime !== undefined && { checkOutTime: input.checkOutTime }),
+        ...(input.amenities !== undefined && { amenities: input.amenities }),
+        ...(input.policies !== undefined && { policies: input.policies }),
+        ...(input.config !== undefined && { config: input.config as unknown as Prisma.InputJsonValue }),
+      };
+      return await this.prisma.property.update({ where: { id }, data });
     } catch (error) {
       throw new InternalServerErrorException('PROPERTY_SERVICE_ERROR: DB property update failed');
     }

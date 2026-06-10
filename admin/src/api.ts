@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+const BASE = import.meta.env.VITE_API_URL ?? '';
 
 function getAdminKey(): string {
   return localStorage.getItem('admin_key') ?? import.meta.env.VITE_ADMIN_KEY ?? '';
@@ -24,10 +24,31 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export type PropertyFeatures = {
+  hostRelay: boolean;
+  budgetQuota: boolean;
+  budgetLimitUsd: number;
+  hostAvailabilityTimeoutMin: number;
+  guestGuide: boolean;
+  proactiveMessaging: boolean;
+  menuSharing: boolean;
+};
+
+export const DEFAULT_PROPERTY_FEATURES: PropertyFeatures = {
+  hostRelay: true,
+  budgetQuota: true,
+  budgetLimitUsd: 2.0,
+  hostAvailabilityTimeoutMin: 5,
+  guestGuide: false,
+  proactiveMessaging: false,
+  menuSharing: false,
+};
+
 export type Property = {
   id: string; name: string; type?: string; description?: string;
-  address?: string; phone?: string; phoneNumber?: string; externalId?: string;
+  address?: string; phone?: string; hostPhone?: string; phoneNumber?: string; externalId?: string;
   checkInTime?: string; checkOutTime?: string; amenities: string[]; policies: string[];
+  config?: { features?: Partial<PropertyFeatures> };
   createdAt: string;
 };
 
@@ -60,10 +81,54 @@ export type Health = {
   dependencies: Record<string, { status: string; detail?: string }>;
 };
 
+export type SystemConfig = {
+  appMode: 'demo' | 'pilot' | 'production';
+  appUrl: string;
+  piiMasking: boolean;
+  admin: { apiKeySet: boolean };
+  llm: {
+    provider: string;
+    model: string;
+    apiKey: string | null;
+    apiKeySet: boolean;
+    claudeModel: string;
+    openaiModel: string;
+    kimiModel: string;
+  };
+  twilio: {
+    accountSid: string | null;
+    authTokenSet: boolean;
+    whatsappNumber: string | null;
+    webhookValidation: boolean;
+  };
+  channelManager: {
+    provider: string;
+    configured: boolean;
+    cm1ChannelId: string | null;
+    cm1ApiKeySet: boolean;
+  };
+  database: {
+    url: string | null;
+    urlSet: boolean;
+  };
+  redis: {
+    host: string;
+    port: number;
+    passwordSet: boolean;
+    tls: boolean;
+  };
+};
+
 // ─── Properties ───────────────────────────────────────────────────────────────
 
 export const api = {
   health: () => request<Health>('/health'),
+  config: () => request<SystemConfig>('/admin/config'),
+  updateConfig: (updates: Record<string, string>, confirmKey: string) =>
+    request<{ saved: boolean }>('/admin/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ updates, confirmKey }),
+    }),
 
   properties: {
     list: () => request<Property[]>('/admin/properties'),
@@ -74,6 +139,11 @@ export const api = {
       request<Property>(`/admin/properties/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     delete: (id: string) => request<void>(`/admin/properties/${id}`, { method: 'DELETE' }),
     sync: (id: string) => request<SyncResult>(`/admin/properties/${id}/sync`, { method: 'POST' }),
+    updateFeatures: (id: string, features: Partial<PropertyFeatures>) =>
+      request<Property>(`/admin/properties/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ config: { features } }),
+      }),
   },
 
   knowledge: {
