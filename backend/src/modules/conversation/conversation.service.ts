@@ -59,6 +59,19 @@ export class ConversationService {
     }
   }
 
+  async setProcessing(conversationId: string, processing: boolean): Promise<Conversation> {
+    try {
+      return await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: { processingAiMessage: processing },
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'CONVERSATION_SERVICE_ERROR: Processing flag update failed',
+      );
+    }
+  }
+
   async getActiveHostConversation(propertyId: string): Promise<Conversation | null> {
     const statuses: ConversationStatus[] = ['host', 'pending', 'awaiting_host'];
     const found = await this.prisma.conversation.findFirst({

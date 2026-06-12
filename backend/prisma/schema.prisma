@@ -58,16 +58,17 @@ model PropertyHost {
 }
 
 model Conversation {
-  id              String             @id @default(uuid()) @db.Uuid
-  userPhone       String
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  propertyId      String?            @db.Uuid
-  channel         Channel            @default(whatsapp)
-  status          ConversationStatus @default(ai)
-  activeHostPhone String?
-  property        Property?          @relation(fields: [propertyId], references: [id])
-  messages        Message[]
+  id                  String             @id @default(uuid()) @db.Uuid
+  userPhone           String
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  propertyId          String?            @db.Uuid
+  channel             Channel            @default(whatsapp)
+  status              ConversationStatus @default(ai)
+  activeHostPhone     String?
+  processingAiMessage Boolean            @default(false)
+  property            Property?          @relation(fields: [propertyId], references: [id])
+  messages            Message[]
 
   @@index([propertyId, userPhone, channel])
   @@index([propertyId, createdAt])

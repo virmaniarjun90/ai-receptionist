@@ -112,6 +112,18 @@ export class QueueProcessor extends WorkerHost {
 
       const joiningHost = hosts.find((h) => h.phone === senderPhone);
 
+      // Send recent message backlog to the joining host
+      const recentMessages = await this.conversationService.getRecentMessages(conversation.id, 5);
+      const guestMessages = recentMessages.filter((m) => m.role === 'user');
+      if (guestMessages.length > 1) {
+        const backlog = guestMessages
+          .slice(0, -1) // All except the most recent
+          .map((m) => `• "${m.content}"`)
+          .join('\n');
+        await this.send(senderPhone, propertyPhone,
+          `📋 **Guest's previous messages:**\n${backlog}\n\n(Latest message below)`);
+      }
+
       await this.send(senderPhone, propertyPhone,
         `You're now connected with the guest. ` +
         `Reply here and your messages will be forwarded to them. ` +
@@ -237,62 +249,75 @@ export class QueueProcessor extends WorkerHost {
       ? await this.reservationService.getActiveReservationByPhone(userPhone, propertyId)
       : null;
 
-    // Budget quota check — count AI replies as a cost proxy
-    if (features?.budgetQuota) {
-      const aiCallCount = await this.conversationService.countAiMessages(conversation.id);
-      const estimatedCost = aiCallCount * AI_COST_PER_CALL_USD;
+    // AI processing lock — prevent concurrent AI calls for same conversation
+    const freshConversation = await this.conversationService.getOrCreateConversation(userPhone, propertyId ?? undefined);
+    if (freshConversation.processingAiMessage) {
+      this.logger.log(`AI processing already in progress for ${userPhone}, skipping this message`);
+      return;
+    }
 
-      if (estimatedCost >= features.budgetLimitUsd) {
-        const hasRelay = features.hostRelay && hosts.length > 0;
-        const budgetMsg = hasRelay
-          ? `I've reached my limit for this conversation. Let me connect you with the host.`
-          : `I've reached my limit for this conversation. Please reach out to the host directly for further help.`;
+    await this.conversationService.setProcessing(conversation.id, true);
 
-        await this.conversationService.addMessage(conversation.id, budgetMsg, 'assistant');
-        await this.send(userPhone, propertyPhone, budgetMsg);
+    try {
+      // Budget quota check — count AI replies as a cost proxy
+      if (features?.budgetQuota) {
+        const aiCallCount = await this.conversationService.countAiMessages(conversation.id);
+        const estimatedCost = aiCallCount * AI_COST_PER_CALL_USD;
 
+        if (estimatedCost >= features.budgetLimitUsd) {
+          const hasRelay = features.hostRelay && hosts.length > 0;
+          const budgetMsg = hasRelay
+            ? `I've reached my limit for this conversation. Let me connect you with the host.`
+            : `I've reached my limit for this conversation. Please reach out to the host directly for further help.`;
+
+          await this.conversationService.addMessage(conversation.id, budgetMsg, 'assistant');
+          await this.send(userPhone, propertyPhone, budgetMsg);
+
+          if (hasRelay && property) {
+            await this.triggerHostRelay(
+              conversation.id, property, propertyPhone, userPhone,
+              reservation?.guestName ?? userPhone, message,
+              features.hostAvailabilityTimeoutMin, hosts,
+              `AI budget reached for ${reservation?.guestName ?? 'guest'}. They may need direct assistance.`,
+            );
+          }
+          return;
+        }
+      }
+
+      // AI handles the message
+      const recentMessages = await this.conversationService.getRecentMessages(conversation.id, 10);
+
+      const rawReply = await this.aiService.generateReply(
+        recentMessages.map((m) => ({ role: m.role, content: m.content })),
+        property,
+        knowledge,
+        reservation,
+      );
+
+      // AI-triggered handoff
+      if (rawReply.startsWith(HANDOFF_PREFIX)) {
+        const visibleMsg = rawReply.slice(HANDOFF_PREFIX.length).trim();
+        await this.conversationService.addMessage(conversation.id, visibleMsg, 'assistant');
+        await this.send(userPhone, propertyPhone, visibleMsg);
+
+        const hasRelay = features?.hostRelay && hosts.length > 0;
         if (hasRelay && property) {
           await this.triggerHostRelay(
             conversation.id, property, propertyPhone, userPhone,
             reservation?.guestName ?? userPhone, message,
-            features.hostAvailabilityTimeoutMin, hosts,
-            `AI budget reached for ${reservation?.guestName ?? 'guest'}. They may need direct assistance.`,
+            features!.hostAvailabilityTimeoutMin, hosts,
+            `${reservation?.guestName ?? 'A guest'} asked something the AI can't answer:\n"${message}"\n\nReply JOIN to assist directly, or SKIP to let the AI try again.`,
           );
         }
         return;
       }
+
+      await this.conversationService.addMessage(conversation.id, rawReply, 'assistant');
+      await this.send(userPhone, propertyPhone, rawReply);
+    } finally {
+      await this.conversationService.setProcessing(conversation.id, false);
     }
-
-    // AI handles the message
-    const recentMessages = await this.conversationService.getRecentMessages(conversation.id, 10);
-
-    const rawReply = await this.aiService.generateReply(
-      recentMessages.map((m) => ({ role: m.role, content: m.content })),
-      property,
-      knowledge,
-      reservation,
-    );
-
-    // AI-triggered handoff
-    if (rawReply.startsWith(HANDOFF_PREFIX)) {
-      const visibleMsg = rawReply.slice(HANDOFF_PREFIX.length).trim();
-      await this.conversationService.addMessage(conversation.id, visibleMsg, 'assistant');
-      await this.send(userPhone, propertyPhone, visibleMsg);
-
-      const hasRelay = features?.hostRelay && hosts.length > 0;
-      if (hasRelay && property) {
-        await this.triggerHostRelay(
-          conversation.id, property, propertyPhone, userPhone,
-          reservation?.guestName ?? userPhone, message,
-          features!.hostAvailabilityTimeoutMin, hosts,
-          `${reservation?.guestName ?? 'A guest'} asked something the AI can't answer:\n"${message}"\n\nReply JOIN to assist directly, or SKIP to let the AI try again.`,
-        );
-      }
-      return;
-    }
-
-    await this.conversationService.addMessage(conversation.id, rawReply, 'assistant');
-    await this.send(userPhone, propertyPhone, rawReply);
   }
 
   // ─── Shared relay trigger — notifies ALL hosts ────────────────────────────
@@ -313,7 +338,7 @@ export class QueueProcessor extends WorkerHost {
     // Send personalised notification to every host — first to reply JOIN wins
     for (const host of hosts) {
       await this.send(host.phone, propertyPhone,
-        `Hi ${host.name}! [${property.name ?? 'Property'}] ${hostNotification}`);
+        `Hi ${host.name}! [${property.name ?? 'Property'} - Guest: ${guestLabel}] ${hostNotification}`);
     }
 
     await this.queueService.addHostTimeoutJob(

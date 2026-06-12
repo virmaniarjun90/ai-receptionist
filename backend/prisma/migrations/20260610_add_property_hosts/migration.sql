@@ -1,5 +1,5 @@
 -- CreateTable: PropertyHost — one row per host per property
-CREATE TABLE "PropertyHost" (
+CREATE TABLE IF NOT EXISTS "PropertyHost" (
     "id"         UUID         NOT NULL DEFAULT gen_random_uuid(),
     "propertyId" UUID         NOT NULL,
     "name"       TEXT         NOT NULL,
@@ -8,17 +8,28 @@ CREATE TABLE "PropertyHost" (
     CONSTRAINT "PropertyHost_pkey" PRIMARY KEY ("id")
 );
 
--- Migrate existing single hostPhone values into PropertyHost rows
-INSERT INTO "PropertyHost" ("propertyId", "name", "phone")
-SELECT "id", 'Host', "hostPhone"
-FROM "Property"
-WHERE "hostPhone" IS NOT NULL;
+-- Migrate existing single hostPhone values into PropertyHost rows (if column exists)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Property' AND column_name='hostPhone') THEN
+    INSERT INTO "PropertyHost" ("propertyId", "name", "phone")
+    SELECT "id", 'Host', "hostPhone"
+    FROM "Property"
+    WHERE "hostPhone" IS NOT NULL
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
 
 -- AddColumn: activeHostPhone on Conversation (nullable — set when a host JOINs)
-ALTER TABLE "Conversation" ADD COLUMN "activeHostPhone" TEXT;
+ALTER TABLE "Conversation" ADD COLUMN IF NOT EXISTS "activeHostPhone" TEXT;
 
--- DropColumn: hostPhone from Property (replaced by PropertyHost table)
-ALTER TABLE "Property" DROP COLUMN "hostPhone";
+-- DropColumn: hostPhone from Property (replaced by PropertyHost table) — only if exists
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Property' AND column_name='hostPhone') THEN
+    ALTER TABLE "Property" DROP COLUMN "hostPhone";
+  END IF;
+END $$;
 
 -- AddForeignKey
 ALTER TABLE "PropertyHost" ADD CONSTRAINT "PropertyHost_propertyId_fkey"
