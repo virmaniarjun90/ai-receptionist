@@ -47,6 +47,11 @@ button {
 }
 .airbnb-input::placeholder { color: #B0B0B0; }
 
+/* Recharts — suppress SVG focus outline on click */
+.recharts-wrapper, .recharts-wrapper svg, .recharts-wrapper *:focus {
+  outline: none !important;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

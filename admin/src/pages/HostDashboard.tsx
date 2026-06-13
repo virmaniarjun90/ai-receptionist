@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+
+const API = import.meta.env.VITE_API_URL ?? '';
+
+function hostFetch(path: string, init?: RequestInit) {
+  return fetch(`${API}${path}`, { credentials: 'include', ...init });
+}
 import { HostLayout } from '../components/HostLayout';
 
 type Property = {
@@ -15,6 +21,7 @@ type ConversationSummary = {
   status: 'ai' | 'awaiting_host' | 'host' | 'pending';
   activeHostName: string | null;
   createdAt: string;
+  lastMessageAt?: string;
   lastMessage: string;
 };
 
@@ -36,6 +43,17 @@ type ConversationDetail = {
   activeHostPhone: string | null;
   handoffTriggeredAt: string | null;
   messages: Message[];
+};
+
+type Reservation = {
+  id: string;
+  guestName: string;
+  guestPhone: string;
+  checkIn: string;
+  checkOut: string;
+  guestCount: number;
+  status: string;
+  propertyName?: string;
 };
 
 type Tab = 'dashboard' | 'properties' | 'conversations';
@@ -87,6 +105,7 @@ export function HostDashboard() {
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
   const [propertyDetail, setPropertyDetail] = useState<any>(null);
   const [conversationDetail, setConversationDetail] = useState<ConversationDetail | null>(null);
 
@@ -118,13 +137,17 @@ export function HostDashboard() {
 
   const fetchProperties = async () => {
     try {
-      const res = await fetch('http://localhost:3000/host/properties', { credentials: 'include' });
+      const res = await hostFetch('/host/properties');
+      if (res.status === 401) { navigate('/host/login'); return; }
       if (!res.ok) throw new Error();
       const data = await res.json();
       setProperties(data);
       if (data.length > 0) {
         setSelectedPropertyId(data[0].id);
-        await fetchConversations(data[0].id);
+        await Promise.all([
+          fetchConversations(data[0].id),
+          fetchAllReservations(data),
+        ]);
       }
     } catch {
       setError('Failed to load properties');
@@ -133,11 +156,31 @@ export function HostDashboard() {
     }
   };
 
+  const fetchAllReservations = async (props: Property[]) => {
+    try {
+      const results = await Promise.all(
+        props.map((p) =>
+          hostFetch(`/host/properties/${p.id}/reservations`)
+            .then((r) => (r.ok ? r.json() : []))
+            .then((rows: Reservation[]) => rows.map((r) => ({ ...r, propertyName: p.name }))),
+        ),
+      );
+      setReservations(results.flat());
+    } catch {}
+  };
+
   const fetchConversations = async (propertyId: string) => {
     try {
-      const res = await fetch(`http://localhost:3000/host/properties/${propertyId}/conversations`, { credentials: 'include' });
+      const res = await hostFetch(`/host/properties/${propertyId}/conversations`);
+      if (res.status === 401) { navigate('/host/login'); return; }
       if (!res.ok) throw new Error();
-      setConversations(await res.json());
+      const data: ConversationSummary[] = await res.json();
+      setConversations(
+        [...data].sort((a, b) =>
+          new Date(b.lastMessageAt ?? b.createdAt).getTime() -
+          new Date(a.lastMessageAt ?? a.createdAt).getTime()
+        )
+      );
     } catch {
       setError('Failed to load conversations');
     }
@@ -145,7 +188,8 @@ export function HostDashboard() {
 
   const fetchPropertyDetail = async (propertyId: string) => {
     try {
-      const res = await fetch(`http://localhost:3000/host/properties/${propertyId}`, { credentials: 'include' });
+      const res = await hostFetch(`/host/properties/${propertyId}`);
+      if (res.status === 401) { navigate('/host/login'); return; }
       if (!res.ok) throw new Error();
       setPropertyDetail(await res.json());
       setView('propertyDetail');
@@ -156,7 +200,8 @@ export function HostDashboard() {
 
   const fetchConversationDetail = async (conversationId: string) => {
     try {
-      const res = await fetch(`http://localhost:3000/host/conversations/${conversationId}`, { credentials: 'include' });
+      const res = await hostFetch(`/host/conversations/${conversationId}`);
+      if (res.status === 401) { navigate('/host/login'); return; }
       if (!res.ok) throw new Error();
       const data = await res.json();
       setConversationDetail(data);
@@ -168,7 +213,8 @@ export function HostDashboard() {
 
   const refreshConversationDetail = async (conversationId: string) => {
     try {
-      const res = await fetch(`http://localhost:3000/host/conversations/${conversationId}`, { credentials: 'include' });
+      const res = await hostFetch(`/host/conversations/${conversationId}`);
+      if (res.status === 401) { navigate('/host/login'); return; }
       if (res.ok) setConversationDetail(await res.json());
     } catch {}
   };
@@ -176,9 +222,8 @@ export function HostDashboard() {
   const handleTakeOver = async () => {
     if (!conversationDetail) return;
     try {
-      const res = await fetch(`http://localhost:3000/host/conversations/${conversationDetail.id}/takeover`, {
+      const res = await hostFetch(`/host/conversations/${conversationDetail.id}/takeover`, {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
       });
       if (!res.ok) throw new Error();
@@ -191,9 +236,8 @@ export function HostDashboard() {
   const handleHandBackToAI = async () => {
     if (!conversationDetail) return;
     try {
-      const res = await fetch(`http://localhost:3000/host/conversations/${conversationDetail.id}/handback`, {
+      const res = await hostFetch(`/host/conversations/${conversationDetail.id}/handback`, {
         method: 'POST',
-        credentials: 'include',
       });
       if (!res.ok) throw new Error();
       await refreshConversationDetail(conversationDetail.id);
@@ -207,9 +251,8 @@ export function HostDashboard() {
     if (!messageInput.trim() || !conversationDetail) return;
     setSendingMessage(true);
     try {
-      const res = await fetch(`http://localhost:3000/host/conversations/${conversationDetail.id}/messages`, {
+      const res = await hostFetch(`/host/conversations/${conversationDetail.id}/messages`, {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: messageInput }),
       });
@@ -467,6 +510,48 @@ export function HostDashboard() {
               <p className="text-sm text-slate-400 mt-0.5">Overview of your properties</p>
             </div>
 
+            {/* ── Active Stays ── */}
+            {reservations.length > 0 && (
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+                  <div>
+                    <h2 className="font-bold text-slate-900">Active Stays</h2>
+                    <p className="text-xs text-slate-500 mt-0.5">Guests currently checked in</p>
+                  </div>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+                    {reservations.length} guest{reservations.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {reservations.map((r) => {
+                    const checkIn = new Date(r.checkIn);
+                    const checkOut = new Date(r.checkOut);
+                    const daysLeft = Math.ceil((checkOut.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                    return (
+                      <div key={r.id} className="px-6 py-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 text-sm font-bold text-emerald-700">
+                            {r.guestName?.charAt(0)?.toUpperCase() ?? '?'}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{r.guestName}</p>
+                            <p className="text-xs text-slate-500">
+                              {r.propertyName && <span className="font-medium text-teal-600">{r.propertyName} · </span>}
+                              {checkIn.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} →{' '}
+                              {checkOut.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                            </p>
+                          </div>
+                        </div>
+                        <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${daysLeft <= 1 ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {daysLeft <= 0 ? 'Checkout today' : daysLeft === 1 ? 'Last night' : `${daysLeft}d left`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="bg-white rounded-xl border border-slate-200 p-6">
                 <h2 className="text-base font-bold text-slate-900 mb-4">Your Properties</h2>
@@ -482,7 +567,7 @@ export function HostDashboard() {
                       }`}
                     >
                       <div className="font-semibold">{prop.name}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">{prop.conversationCount} conversations (30d)</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{prop.conversationCount} conversations total</div>
                     </button>
                   ))}
                 </div>
@@ -527,7 +612,7 @@ export function HostDashboard() {
                 >
                   <h3 className="font-bold text-slate-900 mb-3">{prop.name}</h3>
                   <p className="text-2xl font-bold text-teal-600">{prop.conversationCount}</p>
-                  <p className="text-xs text-slate-500">conversations (30d)</p>
+                  <p className="text-xs text-slate-500">conversations total</p>
                   <p className="mt-4 text-teal-600 text-sm font-medium">View Details →</p>
                 </button>
               ))}
@@ -591,7 +676,9 @@ function ConversationRow({ conv, onClick }: { conv: ConversationSummary; onClick
           <span className={`inline-block px-2 py-1 rounded text-xs font-semibold ${STATUS_COLORS[conv.status] ?? 'bg-slate-100 text-slate-600'}`}>
             {STATUS_LABELS[conv.status] ?? conv.status}
           </span>
-          <p className="text-xs text-slate-400 mt-1.5">{new Date(conv.createdAt).toLocaleDateString()}</p>
+          <p className="text-xs text-slate-400 mt-1.5">
+            {new Date(conv.lastMessageAt ?? conv.createdAt).toLocaleDateString()}
+          </p>
         </div>
       </div>
     </button>

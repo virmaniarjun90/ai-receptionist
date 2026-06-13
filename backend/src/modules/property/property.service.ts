@@ -87,8 +87,13 @@ export class PropertyService {
    */
   async getPropertyByPhone(phoneNumber: string): Promise<Property | null> {
     try {
-      const exact = await this.prisma.property.findUnique({ where: { phoneNumber } });
-      if (exact) return exact;
+      // Try exact match first, then also try with/without whatsapp: prefix
+      const clean = phoneNumber.replace(/^whatsapp:/, '');
+      const variants = [phoneNumber, `whatsapp:${clean}`, clean];
+      for (const variant of variants) {
+        const found = await this.prisma.property.findUnique({ where: { phoneNumber: variant } });
+        if (found) return found;
+      }
 
       // Fallback for single-property / dev setups: return the default property.
       return await this.prisma.property.findUnique({ where: { id: DEFAULT_PROPERTY_ID } });

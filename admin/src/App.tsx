@@ -8,6 +8,8 @@ import { Dashboard } from './pages/Dashboard';
 import { GuestRegistration } from './pages/GuestRegistration';
 import { Login } from './pages/Login';
 import { Properties } from './pages/Properties';
+import { ActiveStays } from './pages/ActiveStays';
+import { Monitor } from './pages/Monitor';
 import { Home } from './pages/Home';
 import { HostLogin } from './pages/HostLogin';
 import { HostDashboard } from './pages/HostDashboard';
@@ -51,7 +53,9 @@ export default function App() {
             <Layout onLogout={handleLogout}>
               {(page, setPage) => {
                 if (page === 'properties') return <Properties />;
+                if (page === 'reservations') return <ActiveStays />;
                 if (page === 'conversations') return <Conversations />;
+                if (page === 'monitor') return <Monitor />;
                 if (page === 'config') return <Config />;
                 return <Dashboard onNavigate={setPage} />;
               }}

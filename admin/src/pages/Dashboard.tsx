@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import { api, Conversation, Health, Property, Reservation } from '../api';
 
-function StatCard({ label, value, sub, icon, color }: {
+function StatCard({ label, value, sub, icon, color, onClick }: {
   label: string; value: string | number; sub?: string;
-  icon: React.ReactNode; color: string;
+  icon: React.ReactNode; color: string; onClick?: () => void;
 }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-5">
+    <div
+      onClick={onClick}
+      className={`bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-5 ${onClick ? 'cursor-pointer hover:border-indigo-200 hover:shadow-md transition-all' : ''}`}
+    >
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
@@ -35,7 +38,7 @@ function HealthRow({ name, dep }: { name: string; dep: { status: string; detail?
   );
 }
 
-export function Dashboard({ onNavigate }: { onNavigate: (p: 'properties' | 'conversations') => void }) {
+export function Dashboard({ onNavigate }: { onNavigate: (p: 'properties' | 'reservations' | 'conversations') => void }) {
   const [health, setHealth] = useState<Health | null>(null);
   const [properties, setProperties] = useState<Property[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -119,13 +122,18 @@ export function Dashboard({ onNavigate }: { onNavigate: (p: 'properties' | 'conv
           value={properties.length}
           sub="configured"
           color="bg-indigo-50"
+          onClick={() => onNavigate('properties')}
           icon={<svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10.5L12 3l9 7.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V10.5z" /><path strokeLinecap="round" strokeLinejoin="round" d="M9 21V12h6v9" /></svg>}
         />
         <StatCard
           label="Active stays"
-          value={reservations.filter((r) => r.status === 'confirmed').length}
-          sub="confirmed reservations"
+          value={reservations.filter((r) => {
+            const now = new Date();
+            return r.status === 'confirmed' && new Date(r.checkIn) <= now && new Date(r.checkOut) >= now;
+          }).length}
+          sub="currently checked in"
           color="bg-emerald-50"
+          onClick={() => onNavigate('reservations')}
           icon={<svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>}
         />
         <StatCard
@@ -133,6 +141,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (p: 'properties' | 'conv
           value={conversations.length}
           sub={activeHost.length > 0 ? `${activeHost.length} host active` : 'all AI-handled'}
           color="bg-violet-50"
+          onClick={() => onNavigate('conversations')}
           icon={<svg className="w-5 h-5 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" /></svg>}
         />
       </div>
@@ -172,10 +181,18 @@ export function Dashboard({ onNavigate }: { onNavigate: (p: 'properties' | 'conv
             </div>
           ) : (
             <div className="space-y-2">
-              {conversations.slice(0, 5).map((c) => {
+              {[...conversations]
+                .sort((a, b) => {
+                  const aDate = a.messages?.[0]?.createdAt ?? a.createdAt;
+                  const bDate = b.messages?.[0]?.createdAt ?? b.createdAt;
+                  return new Date(bDate).getTime() - new Date(aDate).getTime();
+                })
+                .slice(0, 5)
+                .map((c) => {
                 const initials = c.guestName
                   ? c.guestName.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase()
                   : c.userPhone.replace('whatsapp:+', '').replace('+', '').slice(-2);
+                const lastMsgDate = c.messages?.[0]?.createdAt ?? c.createdAt;
                 return (
                   <div key={c.id} className="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
                     <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 text-xs font-semibold text-indigo-600">
@@ -185,7 +202,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (p: 'properties' | 'conv
                       <p className="text-sm font-medium text-slate-800 truncate">{c.guestName}</p>
                       <p className="text-xs text-slate-400 truncate">{c.messages?.[0]?.content ?? 'No messages'}</p>
                     </div>
-                    <span className="text-xs text-slate-400 flex-shrink-0">{new Date(c.createdAt).toLocaleDateString()}</span>
+                    <span className="text-xs text-slate-400 flex-shrink-0">{new Date(lastMsgDate).toLocaleDateString()}</span>
                   </div>
                 );
               })}

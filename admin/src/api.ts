@@ -205,6 +205,13 @@ export const api = {
       ),
   },
 
+  analytics: {
+    get: (propertyId?: string | null) => {
+      const qs = propertyId ? `?propertyId=${propertyId}` : '';
+      return request<any[]>(`/admin/analytics${qs}`);
+    },
+  },
+
   sync: {
     all: () => request<void>('/admin/sync', { method: 'POST' }),
   },

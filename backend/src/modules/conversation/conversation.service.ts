@@ -39,8 +39,8 @@ export class ConversationService {
         where: { id: conversationId },
         data: {
           status,
-          // Record when handoff is triggered so the 3-minute window can be enforced
           ...(status === 'awaiting_host' ? { handoffTriggeredAt: new Date() } : {}),
+          ...(status === 'ai' ? { handoffTriggeredAt: null, activeHostPhone: null, activeHostName: null } : {}),
         },
       });
     } catch (error) {
@@ -251,9 +251,109 @@ export class ConversationService {
   }
 
   async countAiMessages(conversationId: string): Promise<number> {
-    return this.prisma.message.count({
-      where: { conversationId, role: 'assistant' },
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { propertyId: true },
     });
+    const hostPhones = conv?.propertyId
+      ? await this.prisma.propertyHost
+          .findMany({ where: { propertyId: conv.propertyId }, select: { phone: true } })
+          .then((rows) => rows.map((r) => r.phone))
+      : [];
+    return this.prisma.message.count({
+      where: {
+        conversationId,
+        role: 'assistant',
+        ...(hostPhones.length > 0 ? { from: { notIn: hostPhones } } : {}),
+      },
+    });
+  }
+
+  async getAnalytics(propertyId?: string) {
+    const where = propertyId ? { propertyId } : {};
+
+    const conversations = await this.prisma.conversation.findMany({
+      where,
+      select: {
+        id: true,
+        status: true,
+        userPhone: true,
+        propertyId: true,
+        property: { select: { name: true } },
+        messages: {
+          select: { id: true, role: true, from: true, createdAt: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    // Resolve guest names from reservations
+    const phones = [...new Set(conversations.map((c) => c.userPhone).filter((p) => p !== '[deleted]'))];
+    const reservations = phones.length
+      ? await this.prisma.reservation.findMany({
+          where: { guestPhone: { in: phones }, status: { in: ['confirmed', 'completed'] } },
+          select: { guestPhone: true, guestName: true, propertyId: true },
+        })
+      : [];
+    const nameMap = new Map<string, string>();
+    for (const r of reservations) {
+      if (r.guestPhone) {
+        nameMap.set(`${r.guestPhone}|${r.propertyId}`, r.guestName);
+        if (!nameMap.has(r.guestPhone)) nameMap.set(r.guestPhone, r.guestName);
+      }
+    }
+
+    // Resolve host names from PropertyHost
+    const allFromPhones = [...new Set(
+      conversations.flatMap((c) => c.messages.map((m) => m.from)).filter((f) => f !== 'assistant'),
+    )];
+    const hostRows = allFromPhones.length
+      ? await this.prisma.propertyHost.findMany({
+          where: { phone: { in: allFromPhones } },
+          select: { phone: true, name: true },
+        })
+      : [];
+    const hostNameMap = new Map(hostRows.map((h) => [h.phone, h.name]));
+
+    const convStats = conversations.map((c) => {
+      // A message is AI if its sender is NOT a known host phone; host messages ARE in hostNameMap
+      const aiMsgs = c.messages.filter((m) => m.role === 'assistant' && !hostNameMap.has(m.from));
+      const hostMsgs = c.messages.filter((m) => m.role === 'assistant' && hostNameMap.has(m.from));
+      const guestMsgs = c.messages.filter((m) => m.role === 'user');
+      const guestName = nameMap.get(`${c.userPhone}|${c.propertyId}`) ?? nameMap.get(c.userPhone) ?? null;
+      const hostNames = [...new Set(hostMsgs.map((m) => hostNameMap.get(m.from) ?? 'Host'))];
+      return {
+        id: c.id,
+        status: c.status,
+        userPhone: c.userPhone,
+        guestName,
+        propertyId: c.propertyId,
+        propertyName: c.property?.name ?? null,
+        aiMessages: aiMsgs.length,
+        hostMessages: hostMsgs.length,
+        guestMessages: guestMsgs.length,
+        totalMessages: c.messages.length,
+        hostNames,
+        firstMessageAt: c.messages[0]?.createdAt ?? null,
+        lastMessageAt: c.messages[c.messages.length - 1]?.createdAt ?? null,
+        messagesByDay: this.groupByDay(c.messages),
+      };
+    });
+
+    return convStats;
+  }
+
+  private groupByDay(messages: { createdAt: Date; from: string; role: string }[]) {
+    const map = new Map<string, { ai: number; host: number; guest: number }>();
+    for (const m of messages) {
+      const day = new Date(m.createdAt).toISOString().slice(0, 10);
+      const bucket = map.get(day) ?? { ai: 0, host: 0, guest: 0 };
+      if (m.role === 'user') bucket.guest++;
+      else if (m.from === 'assistant') bucket.ai++;
+      else bucket.host++;
+      map.set(day, bucket);
+    }
+    return Object.fromEntries(map);
   }
 
   async anonymizeGuest(phone: string): Promise<{ conversations: number; messages: number }> {
