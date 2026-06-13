@@ -1,6 +1,7 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { Prisma, Property, PropertyHost } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
+import * as bcrypt from 'bcrypt';
 import { DEFAULT_PROPERTY_ID } from './property.constants';
 
 export type PropertyFeatures = {
@@ -53,7 +54,10 @@ export type UpdatePropertyInput = Partial<CreatePropertyInput>;
 export type CreatePropertyHostInput = {
   name: string;
   phone: string;
+  pin?: string;
 };
+
+export type PropertyHostPublic = Omit<PropertyHost, 'pinHash'> & { hasPin: boolean };
 
 @Injectable()
 export class PropertyService {
@@ -154,27 +158,44 @@ export class PropertyService {
 
   // ─── Hosts ────────────────────────────────────────────────────────────────────
 
-  async listHosts(propertyId: string): Promise<PropertyHost[]> {
+  async listHosts(propertyId: string): Promise<PropertyHostPublic[]> {
     await this.getById(propertyId);
     try {
-      return await this.prisma.propertyHost.findMany({
+      const hosts = await this.prisma.propertyHost.findMany({
         where: { propertyId },
         orderBy: { createdAt: 'asc' },
       });
+      return hosts.map(({ pinHash, ...h }) => ({ ...h, hasPin: !!pinHash }));
     } catch (error) {
       throw new InternalServerErrorException('PROPERTY_SERVICE_ERROR: DB hosts query failed');
     }
   }
 
-  async addHost(propertyId: string, input: CreatePropertyHostInput): Promise<PropertyHost> {
+  async addHost(propertyId: string, input: CreatePropertyHostInput): Promise<PropertyHostPublic> {
     await this.getById(propertyId);
     const phone = input.phone.startsWith('whatsapp:') ? input.phone : `whatsapp:${input.phone}`;
+    const pinHash = input.pin ? await bcrypt.hash(input.pin, 12) : undefined;
     try {
-      return await this.prisma.propertyHost.create({
-        data: { propertyId, name: input.name, phone },
+      const host = await this.prisma.propertyHost.create({
+        data: { propertyId, name: input.name, phone, ...(pinHash ? { pinHash } : {}) },
       });
+      const { pinHash: _ph, ...rest } = host;
+      return { ...rest, hasPin: !!_ph };
     } catch (error) {
       throw new InternalServerErrorException('PROPERTY_SERVICE_ERROR: DB host insert failed');
+    }
+  }
+
+  async setHostPin(propertyId: string, hostId: string, pin: string): Promise<{ ok: boolean }> {
+    const pinHash = await bcrypt.hash(pin, 12);
+    try {
+      await this.prisma.propertyHost.update({
+        where: { id: hostId, propertyId },
+        data: { pinHash },
+      });
+      return { ok: true };
+    } catch (error) {
+      throw new NotFoundException(`Host ${hostId} not found for property ${propertyId}`);
     }
   }
 

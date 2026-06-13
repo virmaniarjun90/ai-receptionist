@@ -45,10 +45,11 @@ model Property {
 }
 
 model PropertyHost {
-  id         String   @id @default(uuid()) @db.Uuid
+  id       String   @id @default(uuid()) @db.Uuid
   propertyId String   @db.Uuid
   name       String
   phone      String
+  pinHash    String?
   createdAt  DateTime @default(now())
   property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
@@ -58,17 +59,19 @@ model PropertyHost {
 }
 
 model Conversation {
-  id                  String             @id @default(uuid()) @db.Uuid
-  userPhone           String
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-  propertyId          String?            @db.Uuid
-  channel             Channel            @default(whatsapp)
-  status              ConversationStatus @default(ai)
-  activeHostPhone     String?
-  processingAiMessage Boolean            @default(false)
-  property            Property?          @relation(fields: [propertyId], references: [id])
-  messages            Message[]
+  id                     String             @id @default(uuid()) @db.Uuid
+  userPhone              String
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  propertyId             String?            @db.Uuid
+  channel                Channel            @default(whatsapp)
+  status                 ConversationStatus @default(ai)
+  activeHostPhone        String?
+  activeHostName         String?
+  handoffTriggeredAt     DateTime?
+  processingAiMessage    Boolean            @default(false)
+  property               Property?          @relation(fields: [propertyId], references: [id])
+  messages               Message[]
 
   @@index([propertyId, userPhone, channel])
   @@index([propertyId, createdAt])

@@ -69,7 +69,8 @@ export class QueueProcessor extends WorkerHost {
       ? await this.propertyService.getHostsForProperty(property.id)
       : [];
 
-    const isHost = hosts.some((h) => h.phone === userPhone);
+    const cleanUserPhone = userPhone.replace(/^whatsapp:/, '');
+    const isHost = hosts.some((h) => h.phone.replace(/^whatsapp:/, '') === cleanUserPhone);
 
     if (isHost && property) {
       const activeConv = await this.conversationService.getActiveHostConversation(property.id);
@@ -108,9 +109,8 @@ export class QueueProcessor extends WorkerHost {
       }
 
       await this.conversationService.setStatus(conversation.id, 'host');
-      await this.conversationService.setActiveHost(conversation.id, senderPhone);
-
       const joiningHost = hosts.find((h) => h.phone === senderPhone);
+      await this.conversationService.setActiveHost(conversation.id, senderPhone, joiningHost?.name);
 
       // Send recent message backlog to the joining host
       const recentMessages = await this.conversationService.getRecentMessages(conversation.id, 5);

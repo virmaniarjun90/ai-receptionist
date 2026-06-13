@@ -53,7 +53,7 @@ export type Property = {
 };
 
 export type PropertyHost = {
-  id: string; propertyId: string; name: string; phone: string; createdAt: string;
+  id: string; propertyId: string; name: string; phone: string; createdAt: string; hasPin: boolean;
 };
 
 export type Knowledge = { id: string; propertyId: string; key: string; value: string; updatedAt: string };
@@ -64,7 +64,7 @@ export type Reservation = {
   status: 'confirmed' | 'cancelled' | 'completed' | 'no_show'; guestCount: number; notes?: string;
 };
 
-export type Message = { id: string; role: 'user' | 'assistant'; content: string; from: string; to: string; createdAt: string };
+export type Message = { id: string; role: 'user' | 'assistant'; content: string; from: string; to: string; senderName: string; createdAt: string };
 
 export type ConversationStatus = 'ai' | 'awaiting_host' | 'host' | 'pending';
 
@@ -153,9 +153,13 @@ export const api = {
 
   hosts: {
     list: (propertyId: string) => request<PropertyHost[]>(`/admin/properties/${propertyId}/hosts`),
-    add: (propertyId: string, name: string, phone: string) =>
+    add: (propertyId: string, name: string, phone: string, pin?: string) =>
       request<PropertyHost>(`/admin/properties/${propertyId}/hosts`, {
-        method: 'POST', body: JSON.stringify({ name, phone }),
+        method: 'POST', body: JSON.stringify({ name, phone, ...(pin ? { pin } : {}) }),
+      }),
+    setPin: (propertyId: string, hostId: string, pin: string) =>
+      request<{ ok: boolean }>(`/admin/properties/${propertyId}/hosts/${hostId}/pin`, {
+        method: 'PATCH', body: JSON.stringify({ pin }),
       }),
     remove: (propertyId: string, hostId: string) =>
       request<void>(`/admin/properties/${propertyId}/hosts/${hostId}`, { method: 'DELETE' }),
@@ -185,8 +189,6 @@ export const api = {
   conversations: {
     list: () => request<Conversation[]>('/admin/conversations'),
     get: (id: string) => request<Conversation>(`/admin/conversations/${id}`),
-    takeover: (id: string) => request<{ status: string }>(`/admin/conversations/${id}/takeover`, { method: 'POST' }),
-    handback: (id: string) => request<{ status: string }>(`/admin/conversations/${id}/handback`, { method: 'POST' }),
   },
 
   guests: {

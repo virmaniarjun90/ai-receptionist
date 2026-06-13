@@ -12,11 +12,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Knowledge, Message, Property, PropertyHost, Reservation } from '@prisma/client';
+import { Knowledge, Message, Property, Reservation } from '@prisma/client';
 import { APP_CONFIG, AppConfig } from '../../config/app.config';
 import { SyncService, SyncResult } from '../channel-manager/sync.service';
 import { SyncScheduler } from '../channel-manager/sync.scheduler';
-import { CommunicationService } from '../communication/communication.service';
 import { ConversationService } from '../conversation/conversation.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { PropertyService, CreatePropertyInput, CreatePropertyHostInput, UpdatePropertyInput } from '../property/property.service';
@@ -43,7 +42,6 @@ export class AdminController {
     private readonly knowledgeService: KnowledgeService,
     private readonly reservationService: ReservationService,
     private readonly conversationService: ConversationService,
-    private readonly communicationService: CommunicationService,
     private readonly syncService: SyncService,
     private readonly syncScheduler: SyncScheduler,
     private readonly settingsService: SettingsService,
@@ -198,7 +196,7 @@ export class AdminController {
 
   @Get('properties/:id/hosts')
   @ApiOperation({ summary: 'List all hosts for a property' })
-  listHosts(@Param('id') propertyId: string): Promise<PropertyHost[]> {
+  listHosts(@Param('id') propertyId: string) {
     return this.propertyService.listHosts(propertyId);
   }
 
@@ -207,8 +205,18 @@ export class AdminController {
   addHost(
     @Param('id') propertyId: string,
     @Body() input: CreatePropertyHostInput,
-  ): Promise<PropertyHost> {
+  ) {
     return this.propertyService.addHost(propertyId, input);
+  }
+
+  @Patch('properties/:id/hosts/:hostId/pin')
+  @ApiOperation({ summary: 'Set or update the PIN for a host' })
+  setHostPin(
+    @Param('id') propertyId: string,
+    @Param('hostId') hostId: string,
+    @Body() body: { pin: string },
+  ): Promise<{ ok: boolean }> {
+    return this.propertyService.setHostPin(propertyId, hostId, body.pin);
   }
 
   @Delete('properties/:id/hosts/:hostId')
@@ -291,58 +299,6 @@ export class AdminController {
   @ApiOperation({ summary: 'Get all messages for a phone number (across all conversations)' })
   listMessagesByPhone(@Param('phoneNumber') phoneNumber: string): Promise<Message[]> {
     return this.conversationService.listMessagesForParticipant(phoneNumber);
-  }
-
-  @Post('conversations/:id/takeover')
-  @ApiOperation({
-    summary: 'Host takes over a conversation — AI stops, host is notified on WhatsApp',
-  })
-  async takeoverConversation(@Param('id') id: string) {
-    const conversation = await this.conversationService.getConversationById(id);
-    const property = conversation.property;
-
-    await this.conversationService.setStatus(id, 'awaiting_host');
-    await this.conversationService.setActiveHost(id, null);
-
-    if (property) {
-      const hosts = await this.propertyService.getHostsForProperty(property.id);
-      const lastMsg = conversation.messages.at(-1);
-      const context = lastMsg ? `\nLast guest message: "${lastMsg.content}"` : '';
-
-      for (const host of hosts) {
-        await this.communicationService.sendWhatsAppMessage({
-          to: host.phone,
-          body:
-            `Hi ${host.name}! [${property.name ?? 'Property'}] Admin requested host takeover for ${conversation.userPhone}.${context}\n\n` +
-            `Reply JOIN to assist the guest directly, or SKIP to let the AI handle it.\nSend DONE when finished.`,
-          from: property.phoneNumber ?? undefined,
-        });
-      }
-    }
-
-    await this.communicationService.sendWhatsAppMessage({
-      to: conversation.userPhone,
-      body: "I'm connecting you with the host — they'll be with you shortly.",
-      from: property?.phoneNumber ?? undefined,
-    });
-
-    return { status: 'awaiting_host', conversationId: id };
-  }
-
-  @Post('conversations/:id/handback')
-  @ApiOperation({ summary: 'Hand conversation back to AI assistant' })
-  async handbackConversation(@Param('id') id: string) {
-    await this.conversationService.setStatus(id, 'ai');
-    await this.conversationService.setActiveHost(id, null);
-
-    const conversation = await this.conversationService.getConversationById(id);
-    await this.communicationService.sendWhatsAppMessage({
-      to: conversation.userPhone,
-      body: "You're back with the AI assistant. How can I help?",
-      from: conversation.property?.phoneNumber ?? undefined,
-    });
-
-    return { status: 'ai', conversationId: id };
   }
 
   // ─── Guest data deletion (GDPR / right to erasure) ─────────────────────────

@@ -5,20 +5,24 @@ import { AdminModule } from './modules/admin/admin.module';
 import { CommonModule } from './modules/common/common.module';
 import { GuestModule } from './modules/guest/guest.module';
 import { WebhookModule } from './modules/webhook/webhook.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { HostModule } from './modules/host/host.module';
 
 @Module({
   imports: [
+    CommonModule,
+    AuthModule,
+    WebhookModule,
+    AdminModule,
+    HostModule,
+    GuestModule,
     // Serves admin/dist as a SPA — falls back to index.html for unknown routes.
-    // API controllers (/admin/*, /webhook/*, /guest/*, /health) always take precedence.
+    // Must come LAST so API routes (/admin/*, /auth/*, /host/*, /webhook/*, /guest/*, /health) match first.
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), '..', 'admin', 'dist'),
       renderPath: '/*',
       serveStaticOptions: { index: false },
     }),
-    CommonModule,
-    WebhookModule,
-    AdminModule,
-    GuestModule,
   ],
 })
 export class AppModule {}
