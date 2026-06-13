@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, Conversation, ConversationStatus } from '../api';
+import { api, Conversation, ConversationStatus, Property } from '../api';
 
 const STATUS_CONFIG: Record<ConversationStatus, { label: string; dot: string; bg: string; text: string }> = {
   ai:            { label: 'AI handling',    dot: 'bg-emerald-400', bg: 'bg-emerald-50',  text: 'text-emerald-700' },
@@ -63,6 +63,8 @@ function Avatar({ name, phone }: { name?: string | null; phone: string }) {
 
 export function Conversations() {
   const [list, setList] = useState<Conversation[]>([]);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [filterPropertyId, setFilterPropertyId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -72,8 +74,20 @@ export function Conversations() {
   selectedRef.current = selected;
 
   const loadList = () =>
-    api.conversations.list()
-      .then(setList)
+    Promise.all([
+      api.conversations.list(),
+      api.properties.list(),
+    ])
+      .then(([convs, props]) => {
+        setList(
+          [...convs].sort((a, b) => {
+            const aDate = a.messages?.[0]?.createdAt ?? a.createdAt;
+            const bDate = b.messages?.[0]?.createdAt ?? b.createdAt;
+            return new Date(bDate).getTime() - new Date(aDate).getTime();
+          }),
+        );
+        setProperties(props);
+      })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
 
@@ -88,7 +102,13 @@ export function Conversations() {
           .catch(() => {});
       } else {
         void api.conversations.list()
-          .then(setList)
+          .then((convs) => setList(
+            [...convs].sort((a, b) => {
+              const aDate = a.messages?.[0]?.createdAt ?? a.createdAt;
+              const bDate = b.messages?.[0]?.createdAt ?? b.createdAt;
+              return new Date(bDate).getTime() - new Date(aDate).getTime();
+            }),
+          ))
           .catch(() => {});
       }
     }, 10_000);
@@ -127,7 +147,14 @@ export function Conversations() {
                 }`}
               >
                 <p className="font-semibold text-sm text-slate-900">{conv.guestName}</p>
-                <p className="text-xs text-slate-500 mt-1">{new Date(conv.createdAt).toLocaleDateString()}</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {(() => {
+                    const last = conv.messages?.[conv.messages.length - 1];
+                    return last
+                      ? new Date(last.createdAt).toLocaleDateString()
+                      : new Date(conv.createdAt).toLocaleDateString();
+                  })()}
+                </p>
               </div>
             ))}
           </div>
@@ -153,7 +180,12 @@ export function Conversations() {
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {selected.guestName && <span className="mr-2">{displayPhone}</span>}
-                  {selected.property?.name ?? 'Unknown property'} · {new Date(selected.createdAt).toLocaleString()}
+                  {selected.property?.name ?? 'Unknown property'} · {(() => {
+                    const last = selected.messages?.[selected.messages.length - 1];
+                    return last
+                      ? new Date(last.createdAt).toLocaleString()
+                      : new Date(selected.createdAt).toLocaleString();
+                  })()}
                 </p>
               </div>
             </div>
@@ -236,6 +268,10 @@ export function Conversations() {
     );
   }
 
+  const filtered = filterPropertyId
+    ? list.filter((c) => c.property?.id === filterPropertyId)
+    : list;
+
   return (
     <div className="w-full space-y-5">
       <div className="flex items-center justify-between">
@@ -244,6 +280,32 @@ export function Conversations() {
           <p className="text-sm text-slate-400 mt-0.5">All guest interactions · refreshes every 10 s</p>
         </div>
       </div>
+
+      {/* Property filter */}
+      {!loading && properties.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setFilterPropertyId(null)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${filterPropertyId === null ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+          >
+            All properties
+            <span className="ml-2 text-xs opacity-75">({list.length})</span>
+          </button>
+          {properties.map((p) => {
+            const count = list.filter((c) => c.property?.id === p.id).length;
+            return (
+              <button
+                key={p.id}
+                onClick={() => setFilterPropertyId(p.id)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${filterPropertyId === p.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+              >
+                {p.name}
+                <span className="ml-2 text-xs opacity-75">({count})</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-700">
@@ -260,7 +322,7 @@ export function Conversations() {
 
       {!loading && (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          {list.length === 0 ? (
+          {filtered.length === 0 ? (
             <div className="py-16 text-center">
               <svg className="w-10 h-10 text-slate-200 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" /></svg>
               <p className="text-sm font-medium text-slate-500">No conversations yet</p>
@@ -279,7 +341,7 @@ export function Conversations() {
                 </tr>
               </thead>
               <tbody>
-                {list.map((c, i) => (
+                {filtered.map((c, i) => (
                   <tr
                     key={c.id}
                     onClick={() => handleSelect(c.id)}
@@ -307,8 +369,15 @@ export function Conversations() {
                         )}
                       </div>
                     </td>
-                    <td className="px-5 py-3.5 text-slate-400 max-w-xs truncate">{c.messages?.[0]?.content ?? '—'}</td>
-                    <td className="px-5 py-3.5 text-slate-400 whitespace-nowrap">{new Date(c.createdAt).toLocaleDateString()}</td>
+                    <td className="px-5 py-3.5 max-w-xs">
+                      <p className="text-slate-600 truncate text-sm">{c.messages?.[0]?.content ?? '—'}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {c.messages?.[0]
+                          ? new Date(c.messages[0].createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                          : new Date(c.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                    </td>
+                    <td className="px-5 py-3.5 text-slate-400 whitespace-nowrap text-xs">{new Date(c.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
                     <td className="px-5 py-3.5">
                       <svg className="w-4 h-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
                     </td>

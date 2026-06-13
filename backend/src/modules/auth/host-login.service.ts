@@ -11,10 +11,16 @@ export class HostLoginService {
   ) {}
 
   async login(phone: string, pin: string): Promise<{ token: string; host: any } | null> {
-    // Normalize phone: strip spaces/slashes, extract digits, add +91
-    const digits = phone.replace(/[^0-9]/g, '');
-    const last10 = digits.slice(-10); // Get last 10 digits (in case user included country code)
-    const normalizedPhone = `+91${last10}`;
+    // Normalize: strip spaces/dashes, keep leading +
+    const trimmed = phone.trim().replace(/[\s\-()]/g, '');
+    const digits = trimmed.replace(/[^0-9]/g, '');
+    // If user entered exactly 10 digits (no country code) assume +91 (India)
+    // If they entered more digits or included a + prefix, use as-is
+    const normalizedPhone = trimmed.startsWith('+')
+      ? trimmed
+      : digits.length === 10
+        ? `+91${digits}`
+        : `+${digits}`;
 
     // Some hosts stored with whatsapp: prefix, some without — match both
     const phoneVariants = [normalizedPhone, `whatsapp:${normalizedPhone}`];

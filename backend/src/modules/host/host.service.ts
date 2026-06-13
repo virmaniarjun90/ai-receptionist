@@ -29,12 +29,7 @@ export class HostService {
     const propertiesWithCounts = await Promise.all(
       propertyHosts.map(async (ph) => {
         const count = await this.prisma.conversation.count({
-          where: {
-            propertyId: ph.propertyId,
-            createdAt: {
-              gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-            },
-          },
+          where: { propertyId: ph.propertyId },
         });
         return {
           id: ph.propertyId,
@@ -45,6 +40,24 @@ export class HostService {
     );
 
     return propertiesWithCounts;
+  }
+
+  async getReservationsForProperty(hostPhone: string, propertyId: string): Promise<any[]> {
+    const access = await this.prisma.propertyHost.findFirst({
+      where: { phone: { in: phoneVariants(hostPhone) }, propertyId },
+    });
+    if (!access) throw new UnauthorizedException('No access to this property');
+
+    const now = new Date();
+    return this.prisma.reservation.findMany({
+      where: {
+        propertyId,
+        status: 'confirmed',
+        checkIn: { lte: now },
+        checkOut: { gte: now },
+      },
+      orderBy: { checkIn: 'asc' },
+    });
   }
 
   async getConversationsForProperty(
@@ -60,13 +73,8 @@ export class HostService {
       throw new UnauthorizedException('No access to this property');
     }
 
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
     const conversations = await this.prisma.conversation.findMany({
-      where: {
-        propertyId,
-        createdAt: { gte: thirtyDaysAgo },
-      },
+      where: { propertyId },
       include: {
         messages: { orderBy: { createdAt: 'asc' } },
       },
@@ -96,6 +104,7 @@ export class HostService {
           activeHostPhone: conv.activeHostPhone,
           activeHostName: conv.activeHostPhone ? (hostNameByPhone[conv.activeHostPhone] ?? null) : null,
           createdAt: conv.createdAt,
+          lastMessageAt: conv.messages[conv.messages.length - 1]?.createdAt ?? conv.createdAt,
           messageCount: conv.messages.length,
           lastMessage: conv.messages[conv.messages.length - 1]?.content || '',
         };

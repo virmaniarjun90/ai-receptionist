@@ -16,7 +16,8 @@ export function HostLogin() {
     setError('');
 
     try {
-      const res = await fetch('http://localhost:3000/auth/host/login', {
+      const base = import.meta.env.VITE_API_URL ?? '';
+      const res = await fetch(`${base}/auth/host/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, pin }),

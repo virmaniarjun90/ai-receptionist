@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
@@ -281,6 +282,14 @@ export class AdminController {
     return this.syncScheduler.syncAllProperties();
   }
 
+  // ─── Analytics ──────────────────────────────────────────────────────────────
+
+  @Get('analytics')
+  @ApiOperation({ summary: 'Full message analytics, optionally filtered by property' })
+  getAnalytics(@Query('propertyId') propertyId?: string) {
+    return this.conversationService.getAnalytics(propertyId);
+  }
+
   // ─── Conversations (read-only) ───────────────────────────────────────────────
 
   @Get('conversations')
@@ -293,6 +302,16 @@ export class AdminController {
   @ApiOperation({ summary: 'Get a conversation with full message history' })
   getConversation(@Param('id') id: string) {
     return this.conversationService.getConversationById(id);
+  }
+
+  @Patch('conversations/:id/status')
+  @ApiOperation({ summary: 'Manually set conversation status (admin override)' })
+  async setConversationStatus(
+    @Param('id') id: string,
+    @Body() body: { status: string },
+  ) {
+    await this.conversationService.setStatus(id, body.status as any);
+    return { ok: true };
   }
 
   @Get('conversations/by-phone/:phoneNumber')

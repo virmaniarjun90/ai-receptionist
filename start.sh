@@ -73,7 +73,41 @@ elif command -v pg_isready &>/dev/null; then
   warn "PostgreSQL installed but not running"
   if [ "$OS_TYPE" = "Darwin" ]; then
     info "Attempting to start PostgreSQL on macOS..."
-    brew services start postgresql 2>/dev/null || fail "Could not start PostgreSQL"
+
+    # Detect the installed brew service name (e.g. postgresql@18, postgresql@14, postgresql)
+    PG_SERVICE=$(brew services list 2>/dev/null | awk '/^postgresql/ {print $1}' | head -1)
+
+    if [ -n "$PG_SERVICE" ]; then
+      # Clear stale postmaster.pid if the process it references is gone
+      PG_DATA=$(brew --prefix 2>/dev/null)/var/$PG_SERVICE
+      PG_PID_FILE="$PG_DATA/postmaster.pid"
+      if [ -f "$PG_PID_FILE" ]; then
+        STALE_PID=$(head -1 "$PG_PID_FILE")
+        if ! kill -0 "$STALE_PID" 2>/dev/null; then
+          info "Removing stale postmaster.pid (PID $STALE_PID is gone)..."
+          rm -f "$PG_PID_FILE"
+        fi
+      fi
+
+      # Unload/load via launchctl directly (more reliable than brew services restart)
+      PLIST="$HOME/Library/LaunchAgents/homebrew.mxcl.$PG_SERVICE.plist"
+      if [ -f "$PLIST" ]; then
+        launchctl unload "$PLIST" 2>/dev/null || true
+        sleep 1
+        launchctl load "$PLIST" 2>/dev/null || true
+      else
+        brew services start "$PG_SERVICE" 2>/dev/null || true
+      fi
+
+      sleep 3
+      if pg_isready -q 2>/dev/null; then
+        ok "PostgreSQL started ($PG_SERVICE)"
+      else
+        fail "Could not start PostgreSQL ($PG_SERVICE)"
+      fi
+    else
+      brew services start postgresql 2>/dev/null || fail "Could not start PostgreSQL"
+    fi
   elif [ "$OS_TYPE" = "Linux" ]; then
     info "Attempting to start PostgreSQL on Linux..."
     sudo service postgresql start 2>/dev/null || fail "Could not start PostgreSQL"

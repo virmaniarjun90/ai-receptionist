@@ -280,7 +280,19 @@ function PropertyInfo({ property: p, onEdit }: { property: Property; onEdit: () 
         {row('Type', p.type)}
         {row('Address', p.address)}
         {row('Contact Phone', p.phone)}
-        {row('WhatsApp Number', p.phoneNumber)}
+        <div>
+          <dt className="text-xs text-slate-400 font-medium uppercase tracking-wide">WhatsApp Number (Twilio)</dt>
+          <dd className="text-sm text-slate-800 mt-0.5">
+            {p.phoneNumber ? (
+              <span className="inline-flex items-center gap-1.5 font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+                {p.phoneNumber}
+              </span>
+            ) : (
+              <span className="text-amber-600 text-xs">Using default number — edit to assign a dedicated one</span>
+            )}
+          </dd>
+        </div>
         {row('Channel Manager ID', p.externalId)}
         {row('Check-in', p.checkInTime)}
         {row('Check-out', p.checkOutTime)}
@@ -1083,7 +1095,18 @@ function PropertyForm({
         {field('Type', 'type', 'airbnb / hotel / villa')}
         {field('Address', 'address', '123 Ocean Drive...')}
         {field('Contact phone', 'phone', '+1 305 555 0100')}
-        {field('WhatsApp number (Twilio)', 'phoneNumber', 'whatsapp:+14155238886')}
+        <div className="col-span-2">
+          {field('WhatsApp number (Twilio)', 'phoneNumber', 'whatsapp:+14155238886')}
+          <div className="mt-2 flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5">
+            <svg className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+            <p className="text-xs text-blue-700 leading-relaxed">
+              <strong>How to set up:</strong> Go to Twilio Console → Phone Numbers → Buy a number (WhatsApp-enabled).
+              Then enter it here as <span className="font-mono bg-blue-100 px-1 rounded">whatsapp:+91XXXXXXXXXX</span>.
+              Point the WhatsApp number's webhook to <span className="font-mono bg-blue-100 px-1 rounded">{window.location.origin.replace(':5173', ':3000')}/webhook/whatsapp</span>.
+              Leave blank to use the default number (all properties share one number).
+            </p>
+          </div>
+        </div>
         {field('Channel Manager listing ID', 'externalId', '12345678')}
         {field('Check-in time', 'checkInTime', '3:00 PM')}
         {field('Check-out time', 'checkOutTime', '11:00 AM')}

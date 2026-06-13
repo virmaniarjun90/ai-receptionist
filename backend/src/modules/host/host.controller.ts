@@ -14,6 +14,15 @@ export class HostController {
     return this.host.getPropertiesForHost(hostPhone);
   }
 
+  @Get('properties/:propertyId/reservations')
+  async getReservations(
+    @Param('propertyId') propertyId: string,
+    @Req() req: any,
+  ): Promise<any[]> {
+    const hostPhone = req.hostData.phone;
+    return this.host.getReservationsForProperty(hostPhone, propertyId);
+  }
+
   @Get('properties/:propertyId/conversations')
   async getConversations(
     @Param('propertyId') propertyId: string,
