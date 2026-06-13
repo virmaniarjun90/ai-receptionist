@@ -41,8 +41,8 @@ export function Layout({ children, onLogout }: Props) {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      <aside className="w-60 bg-slate-900 flex flex-col flex-shrink-0">
+    <div className="min-h-screen bg-slate-50">
+      <aside className="fixed left-0 top-0 h-screen w-60 bg-slate-900 flex flex-col z-50 overflow-y-auto">
         <div className="px-5 py-5 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-indigo-500 flex items-center justify-center flex-shrink-0">
@@ -52,7 +52,7 @@ export function Layout({ children, onLogout }: Props) {
             </div>
             <div>
               <p className="text-white text-sm font-semibold leading-none">AI Receptionist</p>
-              <p className="text-slate-400 text-xs mt-0.5">Host Dashboard</p>
+              <p className="text-slate-400 text-xs mt-0.5">Admin Dashboard</p>
             </div>
           </div>
         </div>
@@ -91,7 +91,7 @@ export function Layout({ children, onLogout }: Props) {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto">
+      <main className="ml-60 w-[calc(100%-240px)] h-screen overflow-auto">
         <div className="p-8">{children(page, setPage)}</div>
       </main>
     </div>

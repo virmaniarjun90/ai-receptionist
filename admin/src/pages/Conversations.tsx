@@ -8,6 +8,38 @@ const STATUS_CONFIG: Record<ConversationStatus, { label: string; dot: string; bg
   pending:       { label: 'Guest waiting',  dot: 'bg-orange-400',  bg: 'bg-orange-50',   text: 'text-orange-700'  },
 };
 
+function getDayLabel(date: Date, now: Date): string {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffTime = today.getTime() - messageDate.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+  return messageDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function groupMessagesByDay(messages: any[]) {
+  const now = new Date();
+  const groups: { label: string; messages: any[] }[] = [];
+  let currentDay = '';
+
+  messages.forEach((msg) => {
+    const msgDate = new Date(msg.createdAt);
+    const dayLabel = getDayLabel(msgDate, now);
+
+    if (dayLabel !== currentDay) {
+      currentDay = dayLabel;
+      groups.push({ label: dayLabel, messages: [] });
+    }
+
+    groups[groups.length - 1].messages.push(msg);
+  });
+
+  return groups;
+}
+
 function StatusBadge({ status }: { status: ConversationStatus }) {
   const cfg = STATUS_CONFIG[status];
   return (
@@ -34,7 +66,6 @@ export function Conversations() {
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [actionBusy, setActionBusy] = useState(false);
 
   // Keep a ref so the polling interval can always see the latest selected state
   const selectedRef = useRef<Conversation | null>(null);
@@ -69,65 +100,47 @@ export function Conversations() {
     catch (e) { setError(String(e)); }
   };
 
-  const handleTakeover = async () => {
-    if (!selected) return;
-    if (!confirm('Take over this conversation? The AI will stop responding and you\'ll be notified on WhatsApp to reply directly.')) return;
-    setActionBusy(true);
-    try {
-      await api.conversations.takeover(selected.id);
-      setSelected(await api.conversations.get(selected.id));
-      void loadList();
-    } catch (e) { setError(String(e)); }
-    finally { setActionBusy(false); }
-  };
-
-  const handleHandback = async () => {
-    if (!selected) return;
-    setActionBusy(true);
-    try {
-      await api.conversations.handback(selected.id);
-      setSelected(await api.conversations.get(selected.id));
-      void loadList();
-    } catch (e) { setError(String(e)); }
-    finally { setActionBusy(false); }
-  };
-
-  const handleDeleteGuestData = async () => {
-    if (!selected) return;
-    const name = selected.guestName ?? selected.userPhone;
-    if (!confirm(`Permanently erase all personal data for ${name}? This cannot be undone.`)) return;
-    setActionBusy(true);
-    try {
-      await api.guests.deleteData(selected.userPhone);
-      setSelected(null);
-      void loadList();
-    } catch (e) { setError(String(e)); }
-    finally { setActionBusy(false); }
-  };
-
   if (selected) {
-    const isHostActive = selected.status === 'host' || selected.status === 'pending' || selected.status === 'awaiting_host';
     const displayPhone = selected.userPhone.replace('whatsapp:', '');
-    const displayName = selected.guestName ?? displayPhone;
+    const displayName = selected.guestName;
 
     return (
-      <div className="max-w-2xl space-y-4">
+      <div className="grid grid-cols-3 gap-6 h-full">
+        {/* List Column */}
+        <div className="col-span-1 overflow-auto">
+          <div className="space-y-2">
+            <button
+              onClick={() => setSelected(null)}
+              className="w-full text-left inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors mb-4"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" /></svg>
+              Back to list
+            </button>
+            {list.map((conv) => (
+              <div
+                key={conv.id}
+                onClick={() => handleSelect(conv.id)}
+                className={`p-3 rounded-lg cursor-pointer transition ${
+                  selected?.id === conv.id
+                    ? 'bg-indigo-100 border border-indigo-300'
+                    : 'bg-slate-50 hover:bg-slate-100 border border-slate-100'
+                }`}
+              >
+                <p className="font-semibold text-sm text-slate-900">{conv.guestName}</p>
+                <p className="text-xs text-slate-500 mt-1">{new Date(conv.createdAt).toLocaleDateString()}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Detail Column */}
+        <div className="col-span-2 overflow-auto space-y-4">
         {error && (
           <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-700">
             <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
             {error}
           </div>
         )}
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setSelected(null)}
-            className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" /></svg>
-            Back
-          </button>
-        </div>
 
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <div className="flex items-start justify-between gap-4">
@@ -145,36 +158,7 @@ export function Conversations() {
               </div>
             </div>
 
-            <div className="flex gap-2 flex-shrink-0">
-              {!isHostActive ? (
-                <button
-                  onClick={handleTakeover}
-                  disabled={actionBusy}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>
-                  Take over
-                </button>
-              ) : (
-                <button
-                  onClick={handleHandback}
-                  disabled={actionBusy}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
-                  Hand back to AI
-                </button>
-              )}
-              <button
-                onClick={handleDeleteGuestData}
-                disabled={actionBusy}
-                title="Erase guest personal data (GDPR)"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                Erase data
-              </button>
-            </div>
+            <div className="flex gap-2 flex-shrink-0" />
           </div>
         </div>
 
@@ -192,40 +176,68 @@ export function Conversations() {
           <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3.5">
             <svg className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>
             <div className="text-sm text-blue-800">
-              <strong>Host active{selected.activeHostName ? ` — ${selected.activeHostName}` : ''}.</strong> All replies are forwarded to the guest.
-              Host sends <code className="bg-blue-100 px-1 py-0.5 rounded text-xs">DONE</code> on WhatsApp to hand back to AI.
+              <strong>Host active{selected.activeHostName ? ` — ${selected.activeHostName}` : ''}.</strong> Replies are forwarded to the guest via WhatsApp.
             </div>
           </div>
         )}
 
-        <div className="space-y-2">
-          {selected.messages.map((m) => (
-            <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-start' : 'justify-end'}`}>
-              <div className={`max-w-sm rounded-2xl px-4 py-3 shadow-sm ${
-                m.role === 'user'
-                  ? 'bg-white border border-slate-100 text-slate-800 rounded-bl-sm'
-                  : 'bg-indigo-600 text-white rounded-br-sm'
-              }`}>
-                <p className="text-sm leading-relaxed">{m.content}</p>
-                <p className={`text-xs mt-1.5 ${m.role === 'user' ? 'text-slate-400' : 'text-indigo-300'}`}>
-                  {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </p>
-              </div>
-            </div>
-          ))}
-          {selected.messages.length === 0 && (
+        <div className="space-y-4">
+          {selected.messages.length === 0 ? (
             <div className="py-12 text-center">
               <svg className="w-8 h-8 text-slate-200 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" /></svg>
               <p className="text-sm text-slate-400">No messages yet</p>
             </div>
+          ) : (
+            groupMessagesByDay(selected.messages).map((group, groupIdx) => (
+              <div key={groupIdx} className="space-y-3">
+                <div className="flex items-center gap-3 my-4">
+                  <div className="flex-1 border-t border-slate-300"></div>
+                  <span className="text-xs font-medium text-slate-500 px-2">{group.label}</span>
+                  <div className="flex-1 border-t border-slate-300"></div>
+                </div>
+
+                {group.messages.map((m) => {
+                  const isGuest = m.role === 'user';
+                  const msgTime = new Date(m.createdAt).toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true,
+                  });
+
+                  const getSenderName = () => m.senderName ?? 'AI';
+
+                  return (
+                    <div key={m.id} className={`flex ${isGuest ? 'justify-start' : 'justify-end'}`}>
+                      {isGuest ? (
+                        <div className="max-w-xs">
+                          <div className="bg-white border border-slate-200 rounded-lg px-4 py-2">
+                            <p className="text-sm text-slate-900">{m.content}</p>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1 px-4">{msgTime}</p>
+                        </div>
+                      ) : (
+                        <div className="max-w-xs">
+                          <div className="bg-indigo-600 text-white rounded-lg px-4 py-2">
+                            <p className="text-xs font-semibold mb-1 opacity-90">{getSenderName()}</p>
+                            <p className="text-sm">{m.content}</p>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1 px-4 text-right">{msgTime}</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))
           )}
+        </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl space-y-5">
+    <div className="w-full space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Conversations</h1>
@@ -278,7 +290,7 @@ export function Conversations() {
                         <Avatar name={c.guestName} phone={c.userPhone} />
                         <div>
                           <p className="font-medium text-slate-800">
-                            {c.guestName ?? c.userPhone.replace('whatsapp:', '')}
+                            {c.guestName}
                           </p>
                           {c.guestName && (
                             <p className="text-xs text-slate-400">{c.userPhone.replace('whatsapp:', '')}</p>

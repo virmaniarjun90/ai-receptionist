@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { buildAppConfig, validateConfig } from './config/app.config';
 import { SettingsService } from './modules/admin/settings.service';
@@ -12,6 +13,9 @@ async function bootstrap(): Promise<void> {
   validateConfig(config);
 
   const app = await NestFactory.create(AppModule);
+
+  // Parse cookies
+  app.use(cookieParser());
 
   // Allow the admin UI (dev: localhost:5173, prod: set CORS_ORIGIN) to call the API.
   const corsOrigin = process.env.CORS_ORIGIN ?? 'http://localhost:5173';

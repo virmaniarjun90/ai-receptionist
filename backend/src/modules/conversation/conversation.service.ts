@@ -37,7 +37,11 @@ export class ConversationService {
     try {
       return await this.prisma.conversation.update({
         where: { id: conversationId },
-        data: { status },
+        data: {
+          status,
+          // Record when handoff is triggered so the 3-minute window can be enforced
+          ...(status === 'awaiting_host' ? { handoffTriggeredAt: new Date() } : {}),
+        },
       });
     } catch (error) {
       throw new InternalServerErrorException(
@@ -46,15 +50,28 @@ export class ConversationService {
     }
   }
 
-  async setActiveHost(conversationId: string, hostPhone: string | null): Promise<Conversation> {
+  async setActiveHost(conversationId: string, hostPhone: string | null, hostName?: string | null): Promise<Conversation> {
     try {
       return await this.prisma.conversation.update({
         where: { id: conversationId },
-        data: { activeHostPhone: hostPhone },
+        data: { activeHostPhone: hostPhone, activeHostName: hostName ?? null },
       });
     } catch (error) {
       throw new InternalServerErrorException(
         'CONVERSATION_SERVICE_ERROR: Active host update failed',
+      );
+    }
+  }
+
+  async setProcessing(conversationId: string, processing: boolean): Promise<Conversation> {
+    try {
+      return await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: { processingAiMessage: processing },
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'CONVERSATION_SERVICE_ERROR: Processing flag update failed',
       );
     }
   }
@@ -134,7 +151,7 @@ export class ConversationService {
       const phones = [...new Set(conversations.map((c) => c.userPhone).filter((p) => p !== '[deleted]'))];
       const reservations = phones.length
         ? await this.prisma.reservation.findMany({
-            where: { guestPhone: { in: phones }, status: 'confirmed' },
+            where: { guestPhone: { in: phones }, status: { in: ['confirmed', 'completed'] } },
             select: { guestPhone: true, guestName: true, propertyId: true },
           })
         : [];
@@ -185,7 +202,7 @@ export class ConversationService {
               where: {
                 guestPhone: conversation.userPhone,
                 ...(conversation.propertyId ? { propertyId: conversation.propertyId } : {}),
-                status: 'confirmed',
+                status: { in: ['confirmed', 'completed'] },
               },
               select: { guestName: true },
             })
@@ -204,7 +221,22 @@ export class ConversationService {
             .then((h) => h?.name ?? null)
         : null;
 
-      return { ...conversation, guestName, activeHostName };
+      // Enrich messages with senderName so the frontend doesn't need hardcoded phone maps
+      const allHosts = conversation.propertyId
+        ? await this.prisma.propertyHost.findMany({
+            where: { propertyId: conversation.propertyId },
+            select: { phone: true, name: true },
+          })
+        : [];
+      const hostNameByPhone: Record<string, string> = {};
+      for (const h of allHosts) hostNameByPhone[h.phone] = h.name;
+
+      const enrichedMessages = conversation.messages.map((m) => ({
+        ...m,
+        senderName: m.from === 'assistant' ? 'AI' : (hostNameByPhone[m.from] ?? 'Host'),
+      }));
+
+      return { ...conversation, messages: enrichedMessages, guestName, activeHostName };
     } catch (error) {
       throw new NotFoundException(`Conversation ${id} not found`);
     }
