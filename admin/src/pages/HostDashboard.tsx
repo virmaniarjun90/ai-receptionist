@@ -288,7 +288,7 @@ export function HostDashboard() {
 
   if (view === 'propertyDetail' && propertyDetail) {
     return (
-      <HostLayout hostName={auth.name} hostPhone={auth.phone} activeTab={activeTab} onTabChange={setActiveTab}>
+      <HostLayout hostName={auth.name} hostPhone={auth.phone} activeTab={activeTab} onTabChange={(tab) => { goBack(); setActiveTab(tab); }}>
         <div className="w-full space-y-6 p-6">
           <button onClick={goBack} className="text-teal-600 hover:text-teal-700 text-sm font-medium">← Back</button>
 
@@ -354,7 +354,7 @@ export function HostDashboard() {
     const groupedMessages = groupMessagesByDay(conversationDetail.messages);
 
     return (
-      <HostLayout hostName={auth.name} hostPhone={auth.phone} activeTab={activeTab} onTabChange={setActiveTab}>
+      <HostLayout hostName={auth.name} hostPhone={auth.phone} activeTab={activeTab} onTabChange={(tab) => { goBack(); setActiveTab(tab); }}>
         {/* Full-height flex column — header pinned top, messages scroll, input pinned bottom */}
         <div className="flex flex-col h-full overflow-hidden bg-slate-50">
 

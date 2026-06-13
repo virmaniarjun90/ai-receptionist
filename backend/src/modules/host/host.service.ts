@@ -25,11 +25,12 @@ export class HostService {
       throw new UnauthorizedException('Host has no properties');
     }
 
-    // Get conversation counts for each property
+    // Get conversation counts for each property (last 30 days)
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const propertiesWithCounts = await Promise.all(
       propertyHosts.map(async (ph) => {
         const count = await this.prisma.conversation.count({
-          where: { propertyId: ph.propertyId },
+          where: { propertyId: ph.propertyId, createdAt: { gte: thirtyDaysAgo } },
         });
         return {
           id: ph.propertyId,
@@ -73,8 +74,9 @@ export class HostService {
       throw new UnauthorizedException('No access to this property');
     }
 
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const conversations = await this.prisma.conversation.findMany({
-      where: { propertyId },
+      where: { propertyId, createdAt: { gte: thirtyDaysAgo } },
       include: {
         messages: { orderBy: { createdAt: 'asc' } },
       },
